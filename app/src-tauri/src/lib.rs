@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -115,6 +116,33 @@ impl AccessPolicy {
     }
 }
 
+/// Read a regular, non-symlink text file with a hard byte limit.
+/// The size check is repeated while reading so a file that grows after
+/// metadata inspection cannot cause an unbounded allocation.
+pub(crate) fn read_bounded_text_file(path: &Path, max_bytes: u64) -> Result<String, String> {
+    let metadata = fs::symlink_metadata(path).map_err(|e| format!("Cannot inspect file: {e}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("Access denied: only regular, non-symlink files can be read".into());
+    }
+    if metadata.len() > max_bytes {
+        return Err(format!(
+            "File is too large to read (maximum {max_bytes} bytes)"
+        ));
+    }
+
+    let file = fs::File::open(path).map_err(|e| format!("Cannot open file: {e}"))?;
+    let mut bytes = Vec::with_capacity(metadata.len().min(max_bytes) as usize);
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("Cannot read file: {e}"))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!(
+            "File is too large to read (maximum {max_bytes} bytes)"
+        ));
+    }
+    String::from_utf8(bytes).map_err(|e| format!("Cannot read file as UTF-8 text: {e}"))
+}
+
 fn canonical_directory(path: &str) -> Result<PathBuf, String> {
     let candidate = Path::new(path);
     let canonical = candidate
@@ -214,14 +242,6 @@ fn revoke_folder(path: String, policy: State<'_, AccessPolicy>) -> Result<Vec<St
 fn read_text_file(path: String, policy: State<'_, AccessPolicy>) -> Result<String, String> {
     const MAX_PREVIEW_BYTES: u64 = 1024 * 1024;
     let requested = Path::new(&path);
-    let metadata =
-        fs::symlink_metadata(requested).map_err(|e| format!("Cannot inspect file: {e}"))?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err("Access denied: only regular, non-symlink files can be previewed".into());
-    }
-    if metadata.len() > MAX_PREVIEW_BYTES {
-        return Err("File is too large to preview (maximum 1 MiB)".into());
-    }
     let target = requested
         .canonicalize()
         .map_err(|e| format!("Cannot resolve file: {e}"))?;
@@ -232,7 +252,7 @@ fn read_text_file(path: String, policy: State<'_, AccessPolicy>) -> Result<Strin
     if !roots.iter().any(|root| target.starts_with(root)) {
         return Err("Access denied: file is not inside an approved root".into());
     }
-    fs::read_to_string(&target).map_err(|e| format!("Cannot preview file as UTF-8 text: {e}"))
+    read_bounded_text_file(requested, MAX_PREVIEW_BYTES)
 }
 
 #[cfg(feature = "desktop")]
@@ -438,4 +458,52 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
+}
+
+#[cfg(test)]
+mod bounded_file_tests {
+    use super::read_bounded_text_file;
+    use std::{fs, path::PathBuf};
+
+    fn test_file() -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "sam-bounded-read-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create test directory");
+        let file = dir.join("sample.txt");
+        (dir, file)
+    }
+
+    #[test]
+    fn enforces_limit_and_accepts_exact_limit() {
+        let (dir, file) = test_file();
+        fs::write(&file, b"1234").expect("write exact-limit file");
+        assert_eq!(
+            read_bounded_text_file(&file, 4).expect("read exact limit"),
+            "1234"
+        );
+
+        fs::write(&file, b"12345").expect("write oversized file");
+        assert!(
+            read_bounded_text_file(&file, 4)
+                .unwrap_err()
+                .contains("too large")
+        );
+        fs::remove_dir_all(dir).expect("cleanup test directory");
+    }
+
+    #[test]
+    fn rejects_non_utf8_text() {
+        let (dir, file) = test_file();
+        fs::write(&file, [0xff, 0xfe]).expect("write non-UTF-8 file");
+        assert!(
+            read_bounded_text_file(&file, 8)
+                .unwrap_err()
+                .contains("UTF-8")
+        );
+        fs::remove_dir_all(dir).expect("cleanup test directory");
+    }
 }

@@ -1,4 +1,4 @@
-use super::AccessPolicy;
+use super::{AccessPolicy, read_bounded_text_file};
 use rmcp::{
     ServiceExt, handler::server::wrapper::Parameters, schemars, tool, tool_router, transport::stdio,
 };
@@ -138,16 +138,7 @@ impl DesktopCommanderMcp {
 
     fn read_text_file_inner(&self, path: &str) -> Result<String, String> {
         let target = self.authorize_path(path)?;
-        let metadata =
-            fs::metadata(&target).map_err(|error| format!("Cannot inspect file: {error}"))?;
-        if !metadata.is_file() {
-            return Err("requested path is not a regular file".into());
-        }
-        if metadata.len() > MAX_PREVIEW_BYTES {
-            return Err("file is too large to read (maximum 1 MiB)".into());
-        }
-        fs::read_to_string(&target)
-            .map_err(|error| format!("Cannot read file as UTF-8 text: {error}"))
+        read_bounded_text_file(&target, MAX_PREVIEW_BYTES)
     }
 }
 
