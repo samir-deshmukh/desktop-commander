@@ -97,6 +97,25 @@ impl AccessPolicy {
         }
     }
 
+    fn authorize_path(&self, path: &Path) -> Result<PathBuf, String> {
+        let metadata =
+            fs::symlink_metadata(path).map_err(|error| format!("Cannot inspect path: {error}"))?;
+        if metadata.file_type().is_symlink() {
+            return Err("Access denied: symbolic links cannot be accessed directly".into());
+        }
+        let target = path
+            .canonicalize()
+            .map_err(|error| format!("Cannot resolve path: {error}"))?;
+        let roots = self
+            .approved_roots
+            .lock()
+            .map_err(|_| "Permission state unavailable")?;
+        if !roots.iter().any(|root| target.starts_with(root)) {
+            return Err("Access denied: path is outside every approved folder".into());
+        }
+        Ok(target)
+    }
+
     #[cfg(feature = "desktop")]
     fn persist(&self, roots: &[PathBuf]) -> Result<(), String> {
         let saved = SavedApprovals {
@@ -242,17 +261,8 @@ fn revoke_folder(path: String, policy: State<'_, AccessPolicy>) -> Result<Vec<St
 fn read_text_file(path: String, policy: State<'_, AccessPolicy>) -> Result<String, String> {
     const MAX_PREVIEW_BYTES: u64 = 1024 * 1024;
     let requested = Path::new(&path);
-    let target = requested
-        .canonicalize()
-        .map_err(|e| format!("Cannot resolve file: {e}"))?;
-    let roots = policy
-        .approved_roots
-        .lock()
-        .map_err(|_| "Permission state unavailable")?;
-    if !roots.iter().any(|root| target.starts_with(root)) {
-        return Err("Access denied: file is not inside an approved root".into());
-    }
-    read_bounded_text_file(requested, MAX_PREVIEW_BYTES)
+    let target = policy.authorize_path(requested)?;
+    read_bounded_text_file(&target, MAX_PREVIEW_BYTES)
 }
 
 #[cfg(feature = "desktop")]
@@ -286,20 +296,10 @@ fn run_safe_command(
     let (program, args) = safe_command_spec(&command).ok_or_else(|| {
         "Command not allowed. Choose one of the listed read-only commands.".to_string()
     })?;
-    let target = Path::new(&cwd)
-        .canonicalize()
-        .map_err(|e| format!("Cannot resolve working folder: {e}"))?;
+    let target = policy.authorize_path(Path::new(&cwd))?;
     if !target.is_dir() {
         return Err("Working path is not a directory".into());
     }
-    let roots = policy
-        .approved_roots
-        .lock()
-        .map_err(|_| "Permission state unavailable")?;
-    if !roots.iter().any(|root| target.starts_with(root)) {
-        return Err("Access denied: terminal working folder is not inside an approved root".into());
-    }
-    drop(roots);
     let output = Command::new(program)
         .args(args)
         .current_dir(&target)
@@ -343,15 +343,9 @@ fn run_safe_command(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 fn list_folder(path: String, policy: State<'_, AccessPolicy>) -> Result<Vec<FolderEntry>, String> {
-    let target = Path::new(&path)
-        .canonicalize()
-        .map_err(|e| format!("Cannot resolve path: {e}"))?;
-    let roots = policy
-        .approved_roots
-        .lock()
-        .map_err(|_| "Permission state unavailable")?;
-    if !roots.iter().any(|root| target.starts_with(root)) {
-        return Err("Access denied: folder is not inside an approved root".into());
+    let target = policy.authorize_path(Path::new(&path))?;
+    if !target.is_dir() {
+        return Err("Requested path is not a directory".into());
     }
     let mut entries = Vec::new();
     for item in fs::read_dir(&target).map_err(|e| format!("Cannot read folder: {e}"))? {

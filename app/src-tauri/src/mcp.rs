@@ -77,25 +77,7 @@ impl DesktopCommanderMcp {
 impl DesktopCommanderMcp {
     fn authorize_path(&self, path: &str) -> Result<PathBuf, String> {
         self.policy.refresh()?;
-        let requested = Path::new(path);
-        let metadata = fs::symlink_metadata(requested)
-            .map_err(|error| format!("Cannot inspect path: {error}"))?;
-        if metadata.file_type().is_symlink() {
-            return Err("symbolic links cannot be accessed directly".into());
-        }
-
-        let target = requested
-            .canonicalize()
-            .map_err(|error| format!("Cannot resolve path: {error}"))?;
-        let roots = self
-            .policy
-            .approved_roots
-            .lock()
-            .map_err(|_| "permission state is unavailable")?;
-        if !roots.iter().any(|root| target.starts_with(root)) {
-            return Err("access denied: path is outside every approved folder".into());
-        }
-        Ok(target)
+        self.policy.authorize_path(Path::new(path))
     }
 
     fn list_directory_inner(&self, path: &str) -> Result<Vec<DirectoryEntry>, String> {
