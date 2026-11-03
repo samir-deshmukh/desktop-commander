@@ -43,6 +43,10 @@ function App() {
     return () => { cancelled = true; };
   }, [active]);
   const effectiveTerminalCwd = folders.includes(terminalCwd) ? terminalCwd : (folders[0] ?? '');
+  const activeApprovedRoot = folders.find((root) => currentPath === root || currentPath.startsWith(root.endsWith('/') ? root : `${root}/`));
+  const parentPath = currentPath ? currentPath.slice(0, currentPath.lastIndexOf('/')) || '/' : '';
+  const parentBoundary = activeApprovedRoot ? (activeApprovedRoot.endsWith('/') ? activeApprovedRoot : `${activeApprovedRoot}/`) : '';
+  const canNavigateUp = Boolean(activeApprovedRoot && currentPath !== activeApprovedRoot && (parentPath === activeApprovedRoot || parentPath.startsWith(parentBoundary)));
 
   const addFolder = async () => {
     setError('');
@@ -113,7 +117,7 @@ function App() {
             <div className="workspace-toolbar"><div><h2>Approved folders</h2><p>Only folders you approve are visible. Current operations are read-only.</p></div><button className="primary-button" disabled={busy} onClick={() => void addFolder()}>+ Approve folder</button></div>
             {error && <p className="error-message" role="alert">{error}</p>}
             <div className="folder-layout"><div className="folder-list"><h3>Access roots <span>{folders.length}</span></h3>{folders.length === 0 ? <p className="muted-copy">No folders approved yet.</p> : folders.map((folder) => <div className="folder-row" key={folder}><button className="folder-select" onClick={() => void openFolder(folder)}>▰ <span>{folder}</span></button><button className="revoke-button" onClick={() => void revokeFolder(folder)}>Revoke</button></div>)}</div>
-              <div className="directory-view"><div className="directory-heading"><h3>Directory contents</h3><span>{currentPath || 'Select an approved folder'}</span></div>{busy ? <p className="muted-copy">Loading…</p> : entries.length === 0 ? <p className="muted-copy">Choose an approved root to browse its files and folders.</p> : <div className="entry-list">{entries.map((entry) => <button className="entry-row" key={entry.path} onClick={() => void (entry.is_dir ? openFolder(entry.path) : openFile(entry.path))}><span>{entry.is_dir ? '▰' : '▤'}</span><span>{entry.name}</span><small>{entry.is_dir ? 'Open →' : 'Preview'}</small></button>)}</div>}</div></div>
+              <div className="directory-view"><div className="directory-heading"><div className="directory-heading-top"><h3>Directory contents</h3>{canNavigateUp && <button className="directory-up" onClick={() => void openFolder(parentPath)}>↑ Up</button>}</div><span>{currentPath || 'Select an approved folder'}</span></div>{busy ? <p className="muted-copy">Loading…</p> : entries.length === 0 ? <p className="muted-copy">Choose an approved root to browse its files and folders.</p> : <div className="entry-list">{entries.map((entry) => <button className="entry-row" key={entry.path} onClick={() => void (entry.is_dir ? openFolder(entry.path) : openFile(entry.path))}><span>{entry.is_dir ? '▰' : '▤'}</span><span>{entry.name}</span><small>{entry.is_dir ? 'Open →' : 'Preview'}</small></button>)}</div>}</div></div>
             {preview && <div className="file-preview"><div className="preview-heading"><strong>Text preview</strong><span>{preview.path}</span><button onClick={() => setPreview(null)}>Close</button></div><pre>{preview.content}</pre></div>}
             <p className="hint-copy">Symbolic links are hidden. Folder approvals are saved locally and revalidated when the app starts. Text previews are limited to 1 MiB.</p>
           </div> : active === 'MCP server' ? <div className="workspace-panel mcp-panel">
