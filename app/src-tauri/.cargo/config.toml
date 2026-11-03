@@ -1,0 +1,3 @@
+[build]
+# Keep native builds manageable on low-memory machines.
+jobs = 1

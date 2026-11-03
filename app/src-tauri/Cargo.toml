@@ -1,0 +1,41 @@
+[package]
+name = "app"
+version = "0.1.0"
+description = "Sam's Desktop Commander"
+authors = ["Sam"]
+license = ""
+repository = ""
+edition = "2024"
+rust-version = "1.90"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "app"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "sam-desktop-mcp"
+path = "src/bin/sam-desktop-mcp.rs"
+required-features = ["mcp"]
+
+[features]
+default = ["desktop"]
+desktop = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-log"]
+mcp = ["dep:rmcp", "dep:tokio"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.12.5", features = [], optional = true }
+tauri-plugin-log = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+rmcp = { version = "=3.6.0", features = ["server", "transport-io"], optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }

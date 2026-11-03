@@ -1,0 +1,17 @@
+# Frontend build artifacts
+/app/node_modules/
+/app/dist/
+
+# Rust build artifacts
+/app/src-tauri/target/
+/app/src-tauri/gen/schemas/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and OS files
+*.log
+npm-debug.log*
+.DS_Store
