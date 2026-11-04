@@ -188,7 +188,7 @@ impl AccessPolicy {
         Ok(target)
     }
 
-    #[cfg(feature = "mcp")]
+    #[cfg(any(feature = "desktop", feature = "mcp"))]
     fn authorize_write_target(&self, path: &Path) -> Result<PathBuf, String> {
         self.refresh()?;
         let parent = path
@@ -272,6 +272,93 @@ impl AccessPolicy {
         fs::rename(&temporary, &self.storage_file)
             .map_err(|e| format!("Cannot finalize saved permissions: {e}"))
     }
+}
+
+const MAX_MUTATION_BYTES: usize = 1024 * 1024;
+
+fn write_approved_text_file(
+    policy: &AccessPolicy,
+    path: &Path,
+    content: &str,
+    overwrite: bool,
+) -> Result<(), String> {
+    if content.len() > MAX_MUTATION_BYTES {
+        return Err(format!(
+            "Text content exceeds the {MAX_MUTATION_BYTES}-byte limit"
+        ));
+    }
+    let target = policy.authorize_write_target(path)?;
+    let exists = target.exists();
+    if exists && !overwrite {
+        return Err("File already exists; overwrite permission is required".into());
+    }
+    if exists {
+        let metadata = fs::symlink_metadata(&target)
+            .map_err(|error| format!("Cannot inspect existing file: {error}"))?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err("Only regular files can be overwritten".into());
+        }
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary =
+        target.with_file_name(format!(".sam-commander-{}-{nonce}.tmp", std::process::id()));
+    let result = (|| -> Result<(), String> {
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| format!("Cannot create temporary file: {error}"))?;
+        file.write_all(content.as_bytes())
+            .map_err(|error| format!("Cannot write temporary file: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("Cannot sync temporary file: {error}"))?;
+        fs::rename(&temporary, &target)
+            .map_err(|error| format!("Cannot finalize file write: {error}"))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn create_approved_directory(policy: &AccessPolicy, path: &Path) -> Result<(), String> {
+    let target = policy.authorize_write_target(path)?;
+    fs::create_dir(&target).map_err(|error| format!("Cannot create directory: {error}"))
+}
+
+fn delete_approved_file(policy: &AccessPolicy, path: &Path) -> Result<(), String> {
+    let target = policy.authorize_write_target(path)?;
+    let metadata = fs::symlink_metadata(&target)
+        .map_err(|error| format!("Cannot inspect file to delete: {error}"))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(
+            "Only regular files can be deleted; directories and symbolic links are rejected".into(),
+        );
+    }
+    fs::remove_file(&target).map_err(|error| format!("Cannot delete file: {error}"))
+}
+
+fn move_approved_file(
+    policy: &AccessPolicy,
+    source: &Path,
+    destination: &Path,
+) -> Result<(), String> {
+    let source = policy.authorize_write_target(source)?;
+    let metadata = fs::symlink_metadata(&source)
+        .map_err(|error| format!("Cannot inspect source file: {error}"))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("Only regular files can be moved".into());
+    }
+    let destination = policy.authorize_write_target(destination)?;
+    if destination.exists() {
+        return Err("Destination already exists; refusing to overwrite".into());
+    }
+    fs::rename(&source, &destination).map_err(|error| format!("Cannot move file: {error}"))
 }
 
 /// Read a regular, non-symlink text file with a hard byte limit.
@@ -535,6 +622,46 @@ fn read_text_file(path: String, policy: State<'_, AccessPolicy>) -> Result<Strin
     let requested = Path::new(&path);
     let target = policy.authorize_path(requested)?;
     read_bounded_text_file(&target, MAX_PREVIEW_BYTES)
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn write_text_file(
+    path: String,
+    content: String,
+    overwrite: bool,
+    policy: State<'_, AccessPolicy>,
+) -> Result<(), String> {
+    write_approved_text_file(&policy, Path::new(&path), &content, overwrite)
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn create_directory(path: String, policy: State<'_, AccessPolicy>) -> Result<(), String> {
+    create_approved_directory(&policy, Path::new(&path))
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn delete_file(path: String, confirm: bool, policy: State<'_, AccessPolicy>) -> Result<(), String> {
+    if !confirm {
+        return Err("Set confirm=true to delete this file".into());
+    }
+    delete_approved_file(&policy, Path::new(&path))
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn move_file(
+    source: String,
+    destination: String,
+    confirm: bool,
+    policy: State<'_, AccessPolicy>,
+) -> Result<(), String> {
+    if !confirm {
+        return Err("Set confirm=true to move this file".into());
+    }
+    move_approved_file(&policy, Path::new(&source), Path::new(&destination))
 }
 
 #[cfg(feature = "desktop")]
@@ -886,6 +1013,10 @@ pub fn run() {
             revoke_folder,
             list_folder,
             read_text_file,
+            write_text_file,
+            create_directory,
+            delete_file,
+            move_file,
             terminal_start,
             terminal_write,
             terminal_resize,

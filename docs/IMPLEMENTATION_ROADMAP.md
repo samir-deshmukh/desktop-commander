@@ -24,6 +24,7 @@ Status labels distinguish existing foundation from planned work.
 - [x] Add bounded UTF-8 writes using a temporary sibling file and atomic rename; require overwrite=true for existing files.
 - [x] Restrict delete to individual regular files and refuse move destination overwrites.
 - [x] Add isolated integration coverage for read-only denial, write approval, create, move, delete, and confirmation checks.
+- [x] Add desktop file editing, file/folder creation, rename, and confirmed deletion controls, shown only for writable roots.
 - [ ] Add persistent audit events and a recovery/backup workflow before expanding mutation capabilities.
 
 ## Phase 3 — Terminal and processes

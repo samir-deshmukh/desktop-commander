@@ -748,79 +748,24 @@ impl DesktopCommanderMcp {
     }
 
     fn write_text_file_inner(&self, args: &WriteFileInput) -> Result<(), String> {
-        if args.content.len() as u64 > MAX_PREVIEW_BYTES {
-            return Err(format!(
-                "Text content exceeds the {MAX_PREVIEW_BYTES}-byte limit"
-            ));
-        }
-        let target = self.policy.authorize_write_target(Path::new(&args.path))?;
-        let exists = target.exists();
-        if exists && !args.overwrite {
-            return Err("File already exists; set overwrite=true to replace it".into());
-        }
-        if exists
-            && !fs::symlink_metadata(&target)
-                .map_err(|error| format!("Cannot inspect existing file: {error}"))?
-                .is_file()
-        {
-            return Err("Only regular files can be overwritten".into());
-        }
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let temporary =
-            target.with_file_name(format!(".sam-commander-{}-{nonce}.tmp", std::process::id()));
-        let result = (|| -> Result<(), String> {
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temporary)
-                .map_err(|error| format!("Cannot create temporary file: {error}"))?;
-            file.write_all(args.content.as_bytes())
-                .map_err(|error| format!("Cannot write temporary file: {error}"))?;
-            file.sync_all()
-                .map_err(|error| format!("Cannot sync temporary file: {error}"))?;
-            fs::rename(&temporary, &target)
-                .map_err(|error| format!("Cannot finalize file write: {error}"))?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&temporary);
-        }
-        result
+        super::write_approved_text_file(
+            &self.policy,
+            Path::new(&args.path),
+            &args.content,
+            args.overwrite,
+        )
     }
 
     fn create_directory_inner(&self, path: &str) -> Result<(), String> {
-        let target = self.policy.authorize_write_target(Path::new(path))?;
-        fs::create_dir(&target).map_err(|error| format!("Cannot create directory: {error}"))
+        super::create_approved_directory(&self.policy, Path::new(path))
     }
 
     fn delete_file_inner(&self, path: &str) -> Result<(), String> {
-        let target = self.policy.authorize_write_target(Path::new(path))?;
-        let metadata = fs::symlink_metadata(&target)
-            .map_err(|error| format!("Cannot inspect file to delete: {error}"))?;
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err(
-                "Only regular files can be deleted; directories and symbolic links are rejected"
-                    .into(),
-            );
-        }
-        fs::remove_file(&target).map_err(|error| format!("Cannot delete file: {error}"))
+        super::delete_approved_file(&self.policy, Path::new(path))
     }
 
     fn move_file_inner(&self, source: &str, destination: &str) -> Result<(), String> {
-        let source = self.policy.authorize_write_target(Path::new(source))?;
-        let metadata = fs::symlink_metadata(&source)
-            .map_err(|error| format!("Cannot inspect source file: {error}"))?;
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err("Only regular files can be moved".into());
-        }
-        let destination = self.policy.authorize_write_target(Path::new(destination))?;
-        if destination.exists() {
-            return Err("Destination already exists; refusing to overwrite".into());
-        }
-        fs::rename(&source, &destination).map_err(|error| format!("Cannot move file: {error}"))
+        super::move_approved_file(&self.policy, Path::new(source), Path::new(destination))
     }
 
     fn read_multiple_files_inner(&self, paths: &[String]) -> Result<Vec<(String, String)>, String> {

@@ -78,7 +78,7 @@ Each AI application has its own configuration file and may use a different confi
 - Text reads are limited to 1 MiB.
 - Folder approvals are reloaded before every MCP request, so a revocation in the desktop app blocks the next request.
 - Read approval and write approval are separate. A folder is read-only unless the owner explicitly enables changes in the desktop app.
-- Text writes are limited to 1 MiB and use a temporary sibling file followed by atomic rename.
+- Text writes are limited to 1 MiB and use a temporary sibling file followed by atomic rename. The desktop file manager uses the same write policy and limit.
 - Existing files require overwrite=true; delete, move, and directory creation require confirm=true.
 - Delete only handles regular files; directory deletion and recursive deletion are not exposed.
 - Move refuses to overwrite an existing destination.
