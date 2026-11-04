@@ -38,7 +38,7 @@ Status labels distinguish existing foundation from planned work.
 - [x] Limit concurrent sessions, pace PTY output events, and kill/reap shells on close or app-state drop; reap sessions after shell exit.
 - [x] Runtime-test cleanup behavior on app shutdown; a `sleep 300` child was not present in the immediate post-shutdown process check (single-case evidence, not a universal guarantee).
 - [ ] Test close behavior, shell exit, resize, output floods, and additional child-process behavior in the running desktop app.
-- [x] Add read-only process inspection for processes owned by the current Linux user, with a 500-process cap and no command-line/environment collection.
+- [x] Add current-user process inspection, capped at 500 entries and excluding command-line/environment collection.
 - [x] Add opt-in MCP one-shot command execution, disabled by default, with per-call confirmation, direct process invocation (no shell), approved working directory, timeout, and bounded output.
 - [x] Add interactive MCP PTY sessions with start/write/read/list/close tools, a three-session cap, bounded input/output, and shell cleanup on close.
 - [x] Add current-user process listing to MCP and confirmed SIGTERM for eligible current-user PIDs; protect PID 1 and the app/MCP processes.

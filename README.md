@@ -45,7 +45,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 - Publicly exposed remote server or relay.
 - Unattended privileged commands.
-- Broad desktop input automation before the permission model is implemented.
+- Desktop input automation until Linux display-session support and capture/control permissions are designed and tested.
 - Claiming compatibility with every AI client without testing it.
 
 ## Proposed stack
