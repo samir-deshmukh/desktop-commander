@@ -77,6 +77,7 @@ Each AI application has its own configuration file and may use a different confi
 | list_terminal_sessions | List active MCP terminal session IDs |
 | list_processes | Inspect metadata for current-user Linux processes |
 | terminate_process | Send SIGTERM to a current-user process after explicit confirmation |
+| get_config | Read current folder permissions, command-access state, and server limits |
 | get_recent_tool_calls | Read recent MCP activity metadata |
 | get_usage_stats | Aggregate recent MCP tool usage counts |
 
@@ -85,7 +86,7 @@ Each AI application has its own configuration file and may use a different confi
 - No folders are approved by default.
 - Paths outside approved roots are denied.
 - Direct symbolic-link paths are rejected; symbolic links found during directory listing are skipped.
-- Text reads are limited to 1 MiB. Search sessions retain at most 1,000 matches, return 50 per page, and allow at most five active sessions.
+- Text reads are limited to 1 MiB. Search sessions retain at most 1,000 matches, return 50 per page, and allow at most five active sessions. The get_config tool reports current permission state and limits without exposing credentials.
 - Folder approvals are reloaded before every MCP request, so a revocation in the desktop app blocks the next request.
 - Read approval and write approval are separate. A folder is read-only unless the owner explicitly enables changes in the desktop app.
 - Text writes are limited to 1 MiB and use a temporary sibling file followed by atomic rename. The desktop file manager uses the same write policy and limit.

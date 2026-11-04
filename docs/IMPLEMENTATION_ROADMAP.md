@@ -30,6 +30,7 @@ Status labels distinguish existing foundation from planned work.
 - [x] Add bounded paginated recursive search sessions with next-page, list, and stop operations.
 - [x] Add a bounded local JSONL audit log shared by desktop and MCP processes, plus a recent-activity view; exclude file contents and command arguments.
 - [x] Expose recent MCP tool calls and aggregate usage statistics from the audit log.
+- [x] Expose a read-only MCP configuration snapshot showing permissions and operational limits.
 - [ ] Add a recovery/backup workflow before expanding mutation capabilities.
 
 ## Phase 3 — Terminal and processes

@@ -101,7 +101,7 @@ struct SearchInput {
     path: String,
     /// Case-insensitive substring matched against file and directory names.
     query: String,
-    /// Maximum matches to return (1-200).
+    /// Maximum matches to return (1-1000).
     max_results: Option<usize>,
 }
 
@@ -195,6 +195,19 @@ struct CommandOutput {
 struct RecentToolCallsInput {
     /// Maximum recent MCP events to return (1-100, default 25).
     limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct McpServerConfig {
+    approved_folders: Vec<String>,
+    writable_folders: Vec<String>,
+    command_execution_enabled: bool,
+    max_text_file_bytes: u64,
+    max_command_timeout_ms: u64,
+    max_terminal_sessions: usize,
+    active_terminal_sessions: usize,
+    max_search_sessions: usize,
+    active_search_sessions: usize,
 }
 
 #[derive(Serialize)]
@@ -661,6 +674,63 @@ impl DesktopCommanderMcp {
                 }
             }
             Err(_) => "ERROR: search session state unavailable".into(),
+        }
+    }
+
+    #[tool(
+        description = "Read the current MCP server configuration and permission state. Does not expose credentials or file contents."
+    )]
+    fn get_config(&self) -> String {
+        let result = (|| -> Result<McpServerConfig, String> {
+            self.policy.refresh()?;
+            let approved_folders = self
+                .policy
+                .approved_roots
+                .lock()
+                .map_err(|_| "Permission state unavailable")?
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect();
+            let writable_folders = self
+                .policy
+                .writable_roots
+                .lock()
+                .map_err(|_| "Permission state unavailable")?
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect();
+            let command_execution_enabled = self
+                .policy
+                .command_execution_enabled
+                .lock()
+                .map_err(|_| "Permission state unavailable")
+                .map(|value| *value)?;
+            let active_terminal_sessions = self
+                .terminal_sessions
+                .lock()
+                .map_err(|_| "Terminal session state unavailable")?
+                .len();
+            let active_search_sessions = self
+                .search_sessions
+                .lock()
+                .map_err(|_| "Search session state unavailable")?
+                .len();
+            Ok(McpServerConfig {
+                approved_folders,
+                writable_folders,
+                command_execution_enabled,
+                max_text_file_bytes: MAX_PREVIEW_BYTES,
+                max_command_timeout_ms: 30_000,
+                max_terminal_sessions: 3,
+                active_terminal_sessions,
+                max_search_sessions: MAX_SEARCH_SESSIONS,
+                active_search_sessions,
+            })
+        })();
+        match result {
+            Ok(config) => serde_json::to_string_pretty(&config)
+                .unwrap_or_else(|error| format!("ERROR: cannot serialize MCP config: {error}")),
+            Err(error) => format!("ERROR: {error}"),
         }
     }
 

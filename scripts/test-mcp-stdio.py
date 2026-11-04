@@ -129,7 +129,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "start_search", "get_more_search_results", "list_searches", "stop_search", "write_text_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process", "get_recent_tool_calls", "get_usage_stats"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "start_search", "get_more_search_results", "list_searches", "stop_search", "write_text_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process", "get_config", "get_recent_tool_calls", "get_usage_stats"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -138,6 +138,13 @@ def main() -> int:
             )))
             assert roots == []
             passed.append("no folders approved by default")
+
+            initial_config = json.loads(response_text(client.request(
+                "tools/call", {"name": "get_config", "arguments": {}}
+            )))
+            assert initial_config["approved_folders"] == []
+            assert not initial_config["command_execution_enabled"]
+            passed.append("permission-aware MCP configuration view")
 
             disabled_command = response_text(client.request(
                 "tools/call", {"name": "run_command", "arguments": {
