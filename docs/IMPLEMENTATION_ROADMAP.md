@@ -37,7 +37,10 @@ Status labels distinguish existing foundation from planned work.
 - [ ] Design carefully scoped process termination with explicit confirmation and ownership checks.
 - [x] Add opt-in MCP one-shot command execution, disabled by default, with per-call confirmation, direct process invocation (no shell), approved working directory, timeout, and bounded output.
 - [x] Add interactive MCP PTY sessions with start/write/read/list/close tools, a three-session cap, bounded input/output, and shell cleanup on close.
-- [ ] Add additional child-process lifecycle tests and process termination controls with explicit confirmation and ownership checks.
+- [x] Add current-user process listing to MCP and confirmed SIGTERM for eligible current-user PIDs; protect PID 1 and the app/MCP processes.
+- [x] Add a process Stop action in the desktop UI with a confirmation prompt.
+- [x] Test termination against an isolated child process owned by the test runner.
+- [ ] Add further process lifecycle checks for stale PIDs and process-exit races.
 - [ ] Add process termination controls with explicit confirmation and ownership checks; do not rely on command-string blacklists.
 
 ## Phase 4 — Linux desktop automation

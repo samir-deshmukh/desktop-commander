@@ -107,6 +107,15 @@ function App() {
     catch (e) { setError(String(e)); }
     finally { setProcessBusy(false); }
   }, []);
+  const terminateProcess = async (pid: number, name: string) => {
+    if (!window.confirm('Send SIGTERM to ' + name + ' (PID ' + pid + ')? Unsaved work in that process may be lost.')) return;
+    setError('');
+    try {
+      await invoke('terminate_process', { pid, confirm: true });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await refreshProcesses();
+    } catch (e) { setError(String(e)); }
+  };
   useEffect(() => {
     if (active !== 'MCP server') return;
     let cancelled = false;
@@ -211,9 +220,9 @@ function App() {
           </div> : active === 'Processes' ? <div className="workspace-panel processes-panel">
             <div className="workspace-toolbar"><div><h2>Running processes</h2><p>Process metadata for your Linux user. Command arguments are not collected.</p></div><button className="primary-button" disabled={processBusy} onClick={() => void refreshProcesses()}>{processBusy ? 'Refreshing…' : 'Refresh'}</button></div>
             {error && <p className="error-message" role="alert">{error}</p>}
-            {processSnapshot && <><div className="process-summary"><span>{processSnapshot.processes.length} processes shown</span><span>Current user only · No controls to stop processes</span></div><div className="process-table-wrap"><table className="process-table"><thead><tr><th>PID</th><th>Process</th><th>Parent</th><th>State</th><th>Memory</th></tr></thead><tbody>{processSnapshot.processes.map((process) => <tr key={process.pid}><td>{process.pid}</td><td>{process.name}</td><td>{process.parent_pid}</td><td>{process.state}</td><td>{formatMemory(process.resident_memory_bytes)}</td></tr>)}</tbody></table></div>{processSnapshot.truncated && <p className="hint-copy">The list is capped at 500 processes. Some entries are not shown.</p>}</>}
+            {processSnapshot && <><div className="process-summary"><span>{processSnapshot.processes.length} processes shown</span><span>Current user only · No controls to stop processes</span></div><div className="process-table-wrap"><table className="process-table"><thead><tr><th>PID</th><th>Process</th><th>Parent</th><th>State</th><th>Memory</th><th>Action</th></tr></thead><tbody>{processSnapshot.processes.map((process) => <tr key={process.pid}><td>{process.pid}</td><td>{process.name}</td><td>{process.parent_pid}</td><td>{process.state}</td><td>{formatMemory(process.resident_memory_bytes)}</td><td><button className="process-stop" disabled={process.pid === 1 || process.name === 'app' || process.name.startsWith('sam-desktop')} onClick={() => void terminateProcess(process.pid, process.name)}>Stop</button></td></tr>)}</tbody></table></div>{processSnapshot.truncated && <p className="hint-copy">The list is capped at 500 processes. Some entries are not shown.</p>}</>}
             {!processSnapshot && !error && <p className="muted-copy">{processBusy ? 'Reading process information…' : 'No process information loaded.'}</p>}
-            <p className="hint-copy">This feature reads Linux process metadata from /proc. It does not read command-line arguments, environment variables, or file contents, and it cannot terminate processes.</p>
+            <p className="hint-copy">This feature reads Linux process metadata from /proc. It does not read command-line arguments, environment variables, or file contents. Stop sends SIGTERM only to current-user processes; the application and MCP processes are protected.</p>
           </div> : active === 'MCP server' ? <div className="workspace-panel mcp-panel">
             <div className="workspace-toolbar"><div><h2>Local MCP server</h2><p>Compatible AI clients launch this local process over standard input/output. No network port is opened.</p></div><span className="terminal-safety">STDIO · LOCAL</span></div>
             {error && <p className="error-message" role="alert">{error}</p>}

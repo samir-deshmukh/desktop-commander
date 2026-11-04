@@ -14,7 +14,7 @@ use tauri::{Emitter, Manager, State};
 
 #[cfg(feature = "mcp")]
 mod mcp;
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "mcp"))]
 mod processes;
 #[cfg(feature = "mcp")]
 pub use mcp::run_stdio_server;
@@ -355,6 +355,8 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
             "read_terminal",
             "close_terminal",
             "list_terminal_sessions",
+            "list_processes",
+            "terminate_process",
         ],
     })
 }
@@ -363,6 +365,15 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
 #[tauri::command]
 fn list_processes() -> Result<processes::ProcessSnapshot, String> {
     processes::list_current_user_processes()
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn terminate_process(pid: u32, confirm: bool) -> Result<(), String> {
+    if !confirm {
+        return Err("Set confirm=true to terminate this process".into());
+    }
+    processes::terminate_current_user_process(pid)
 }
 
 #[cfg(feature = "desktop")]
@@ -865,6 +876,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             mcp_server_info,
             list_processes,
+            terminate_process,
             approved_folders,
             writable_folders,
             set_folder_write_access,

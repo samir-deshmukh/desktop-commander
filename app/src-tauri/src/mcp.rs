@@ -112,6 +112,14 @@ struct CommandOutput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct TerminateProcessInput {
+    /// PID of a process owned by the current Linux user.
+    pid: u32,
+    /// Must be true to confirm sending SIGTERM.
+    confirm: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct StartTerminalInput {
     /// Approved working directory for the interactive shell.
     cwd: String,
@@ -422,6 +430,30 @@ impl DesktopCommanderMcp {
                     format!("ERROR: cannot serialize terminal sessions: {error}")
                 }),
             Err(_) => "ERROR: terminal session state unavailable".into(),
+        }
+    }
+
+    #[tool(
+        description = "List process metadata for processes owned by the current Linux user. Does not collect command-line arguments or environment variables; capped at 500 processes."
+    )]
+    fn list_processes(&self) -> String {
+        match super::processes::list_current_user_processes() {
+            Ok(snapshot) => serde_json::to_string_pretty(&snapshot)
+                .unwrap_or_else(|error| format!("ERROR: cannot serialize process list: {error}")),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Send SIGTERM to one process owned by the current Linux user. Requires confirm=true. PID 1, the current MCP process, and Sam's Desktop Commander processes are protected."
+    )]
+    fn terminate_process(&self, Parameters(args): Parameters<TerminateProcessInput>) -> String {
+        if !args.confirm {
+            return "ERROR: set confirm=true to terminate this process".into();
+        }
+        match super::processes::terminate_current_user_process(args.pid) {
+            Ok(()) => format!("SIGTERM sent to process {}", args.pid),
+            Err(error) => format!("ERROR: {error}"),
         }
     }
 }

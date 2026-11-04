@@ -67,6 +67,8 @@ Each AI application has its own configuration file and may use a different confi
 | read_terminal | Read bounded output from an active terminal session |
 | close_terminal | Close a terminal session and terminate its shell |
 | list_terminal_sessions | List active MCP terminal session IDs |
+| list_processes | Inspect metadata for current-user Linux processes |
+| terminate_process | Send SIGTERM to a current-user process after explicit confirmation |
 
 ## Permission boundaries
 
@@ -85,6 +87,8 @@ Each AI application has its own configuration file and may use a different confi
 - Commands run with the desktop user's normal OS permissions; an approved working directory is not a sandbox.
 - Interactive MCP terminal sessions use a local PTY, require command access to be enabled and confirm=true when starting, and are limited to three concurrent sessions.
 - Terminal input is capped at 16 KiB per call; output is delivered in chunks through a bounded channel. Closing the session kills and reaps its shell.
+- Process inspection is limited to the current Linux user, capped at 500 entries, and omits command-line arguments and environment variables.
+- Process termination requires confirm=true and sends SIGTERM only. PID 1, the current MCP process, and Sam's Desktop Commander processes are protected.
 - Do not expose this STDIO server through a network wrapper or public tunnel.
 
 ## Protocol implementation and local test

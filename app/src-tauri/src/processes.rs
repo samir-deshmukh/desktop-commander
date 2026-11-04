@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 const MAX_VISIBLE_PROCESSES: usize = 500;
@@ -58,6 +59,38 @@ pub(crate) fn list_current_user_processes() -> Result<ProcessSnapshot, String> {
     #[cfg(not(target_os = "linux"))]
     {
         Err("Process inspection is currently supported on Linux only".into())
+    }
+}
+
+pub(crate) fn terminate_current_user_process(pid: u32) -> Result<(), String> {
+    if pid <= 1 || pid == std::process::id() {
+        return Err("Refusing to terminate a protected process ID".into());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let proc_root = Path::new("/proc");
+        let current_uid = read_uid(
+            &fs::read_to_string(proc_root.join("self/status"))
+                .map_err(|error| format!("Cannot inspect current user ID: {error}"))?,
+        )?;
+        let target = read_process(proc_root, pid, current_uid)
+            .ok_or("Process is not running or is not owned by the current user")?;
+        if target.name == "app" || target.name.starts_with("sam-desktop") {
+            return Err("Refusing to terminate Sam's Desktop Commander processes".into());
+        }
+        let status = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status()
+            .map_err(|error| format!("Cannot send termination signal: {error}"))?;
+        if !status.success() {
+            return Err("The operating system rejected the termination request".into());
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        Err("Process termination is currently supported on Linux only".into())
     }
 }
 
@@ -147,6 +180,17 @@ mod tests {
             "the current test process should be visible"
         );
         assert!(snapshot.processes.len() <= MAX_VISIBLE_PROCESSES);
+    }
+
+    #[test]
+    fn terminates_a_child_owned_by_the_current_user() {
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("start test child process");
+        terminate_current_user_process(child.id()).expect("terminate owned child");
+        let status = child.wait().expect("reap test child");
+        assert!(!status.success());
     }
 
     #[test]

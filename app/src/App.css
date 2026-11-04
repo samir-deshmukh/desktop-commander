@@ -55,3 +55,5 @@ nav { display: grid; gap: 5px; }.nav-item { display: flex; align-items: center; 
 .command-state { grid-column:1/-1; color:#858c99; font:9px 'DM Mono',monospace; letter-spacing:.7px; }
 .command-state.enabled { color:#c7e97b; }
 @media (max-width:850px) { .command-access-card { grid-template-columns:1fr; }.command-access-card button { justify-self:start; } }
+.process-stop { border:1px solid #594047; border-radius:5px; background:#2b1d22; color:#ffb4b4; padding:5px 8px; font-size:9px; }
+.process-stop:disabled { opacity:.35; cursor:not-allowed; }

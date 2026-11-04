@@ -129,7 +129,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -270,6 +270,33 @@ def main() -> int:
             ))
             assert "closed" in closed.lower()
             passed.append("interactive terminal start, input, output, and close")
+
+            process_snapshot = json.loads(response_text(client.request(
+                "tools/call", {"name": "list_processes", "arguments": {}}
+            )))
+            assert any(item["pid"] == client.process.pid for item in process_snapshot["processes"])
+            passed.append("current-user process listing")
+
+            child_process = subprocess.Popen(["sleep", "30"])
+            try:
+                denied_termination = response_text(client.request(
+                    "tools/call", {"name": "terminate_process", "arguments": {
+                        "pid": child_process.pid, "confirm": False
+                    }}
+                ))
+                assert "confirm=true" in denied_termination
+                terminated = response_text(client.request(
+                    "tools/call", {"name": "terminate_process", "arguments": {
+                        "pid": child_process.pid, "confirm": True
+                    }}
+                ))
+                assert "SIGTERM sent" in terminated
+                child_process.wait(timeout=3)
+            finally:
+                if child_process.poll() is None:
+                    child_process.kill()
+                    child_process.wait(timeout=2)
+            passed.append("confirmed termination of a current-user child process")
 
             denied_delete = response_text(client.request(
                 "tools/call", {"name": "delete_file", "arguments": {
