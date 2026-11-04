@@ -49,12 +49,12 @@ Status labels distinguish existing foundation from planned work.
 - [x] Test termination against an isolated child process owned by the test runner.
 - [ ] Add further process lifecycle checks for stale PIDs and process-exit races.
 
-## Phase 4 — Linux desktop automation
-- [x] Identify active X11/Wayland session and Cinnamon compatibility; record the verified X11/Cinnamon environment.
-- [x] Evaluate accessibility and desktop automation candidates; record AT-SPI, Enigo, and portal findings in `docs/DESKTOP_AUTOMATION_EVALUATION.md`.
-- [x] Implement read-only AT-SPI2 MCP discovery and bounded accessibility-tree snapshots with per-call confirmation; no input or capture controls.
-- [ ] Run automation in an isolated adapter where practical.
-- [ ] Make capture/control permissions explicit and visible.
+## Phase 4 — Desktop Commander feature parity
+- [x] Compare the current tool set against the original Desktop Commander MCP feature categories.
+- [x] Keep the product centered on filesystem, terminal, process, configuration, and MCP-client workflows; generic keyboard/mouse automation and screenshot capture are not part of this parity scope.
+- [ ] Audit and implement missing original MCP tools, preserving compatible tool names and behavior where practical.
+- [ ] Verify configuration, search, file editing, and terminal workflows against the original tool behavior.
+- [ ] Keep platform-specific UI inspection separate from the core Desktop Commander feature set.
 
 ## Phase 5 — Packaging and remote access
 - [ ] Validate packaging, update/signing, and install/uninstall behavior.

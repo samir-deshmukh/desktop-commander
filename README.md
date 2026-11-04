@@ -31,7 +31,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - MCP client compatibility testing across individual AI applications; the automated local STDIO integration test passes, but each client still needs its own configuration test.
 - Terminal lifecycle tests in the running desktop app (shell exit, resize, output floods, and additional child-process cases).
 - Process-exit race and stale-PID checks.
-- Keyboard/mouse input automation, screenshot capture, and authenticated ChatGPT connectivity. ChatGPT Free currently cannot add custom MCP servers.
+- Remaining original Desktop Commander MCP tools and compatibility checks. Generic keyboard/mouse automation and screenshot capture are outside the intended feature scope. Authenticated ChatGPT connectivity is also not enabled; client availability depends on the client and account.
 
 ## Product goals
 
@@ -45,7 +45,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 - Publicly exposed remote server or relay.
 - Unattended privileged commands.
-- Desktop input automation until Linux display-session support and capture/control permissions are designed and tested.
+- Generic desktop keyboard/mouse automation and screenshot capture; the project follows Desktop Commander’s filesystem, terminal, process, and MCP workflow model.
 - Claiming compatibility with every AI client without testing it.
 
 ## Proposed stack
@@ -80,7 +80,7 @@ Small, reviewable changes; a separate commit for each meaningful change; tests f
 4. Permissioned filesystem tools and desktop file manager — complete
 5. Opt-in MCP command execution and interactive terminal sessions — implemented; lifecycle testing remains
 6. Current-user process management and activity history — implemented
-7. Read-only Linux AT-SPI accessibility inspection implemented; keyboard/mouse control and screenshot capture remain outstanding
+7. Original Desktop Commander feature parity audit and missing MCP tools
 8. Client compatibility tests
 9. Linux packaging and installation guide
 10. Optional authenticated remote connectivity
