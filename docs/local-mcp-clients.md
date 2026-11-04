@@ -95,11 +95,12 @@ Each AI application has its own configuration file and may use a different confi
 - Move and copy refuse to overwrite an existing destination. Copy is capped at 50 MiB; append keeps the combined UTF-8 file within 1 MiB.
 - MCP command execution is disabled by default and must be enabled in the desktop app. Each call also requires confirm=true.
 - Commands are launched directly without shell interpretation, with a 30-second timeout and 256 KiB caps for stdout and stderr.
-- Commands run with the desktop user's normal OS permissions; an approved working directory is not a sandbox.
+- A default blocklist rejects privilege escalation/user administration, disk and partition management, shutdown/reboot, firewall changes, and direct process-termination commands. It also checks common `env`/`busybox` wrappers and protected `systemctl`/`loginctl` actions. Development tools such as `git`, `npm`, `node`, `python`, `cargo`, `curl`, and `wget` remain available.
+- This blocklist is a guardrail, not a security boundary. Allowed tools may execute scripts, spawn child processes, or perform other operations with the desktop user's normal OS permissions; an approved working directory is not a sandbox.
 - Interactive MCP terminal sessions use a local PTY, require command access to be enabled and confirm=true when starting, and are limited to three concurrent sessions. Disabling command access closes an active session on its next read or input request.
 - Terminal input is capped at 16 KiB per call; output is delivered in chunks through a bounded channel. Closing the session kills and reaps its shell.
 - Process inspection is limited to the current Linux user, capped at 500 entries, and omits command-line arguments and environment variables.
-- Process termination requires confirm=true and sends SIGTERM only. PID 1, the current MCP process, and Sam's Desktop Commander processes are protected.
+- Process termination requires confirm=true and sends SIGTERM only. PID 1, the desktop application's process ancestry, known desktop/login/session infrastructure, and Sam's Desktop Commander processes are protected.
 - Do not expose this STDIO server through a network wrapper or public tunnel.
 
 ## Protocol implementation and local test

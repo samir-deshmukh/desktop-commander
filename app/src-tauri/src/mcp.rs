@@ -29,6 +29,62 @@ const MAX_MULTI_READ_BYTES: usize = 4 * 1024 * 1024;
 const MAX_CONTENT_SEARCH_FILES: usize = 1_000;
 const MAX_CONTENT_SEARCH_FILE_BYTES: u64 = 256 * 1024;
 
+// High-impact system commands are blocked even when command execution is enabled.
+// This is a guardrail, not a sandbox: allowed programs still run with the user's OS permissions.
+const BLOCKED_COMMANDS: &[&str] = &[
+    "adduser",
+    "useradd",
+    "usermod",
+    "groupadd",
+    "chsh",
+    "passwd",
+    "visudo",
+    "sudo",
+    "su",
+    "doas",
+    "pkexec",
+    "mkfs",
+    "format",
+    "mount",
+    "umount",
+    "fdisk",
+    "sfdisk",
+    "parted",
+    "diskpart",
+    "dd",
+    "wipefs",
+    "blkdiscard",
+    "sgdisk",
+    "partprobe",
+    "losetup",
+    "cryptsetup",
+    "shutdown",
+    "reboot",
+    "halt",
+    "poweroff",
+    "init",
+    "iptables",
+    "ip6tables",
+    "nft",
+    "firewall",
+    "ufw",
+    "netsh",
+    "sfc",
+    "bcdedit",
+    "reg",
+    "net",
+    "sc",
+    "runas",
+    "cipher",
+    "takeown",
+    "kill",
+    "killall",
+    "pkill",
+    "runuser",
+    "setpriv",
+    "systemd-run",
+];
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct PathInput {
     /// Absolute path inside a folder approved in Sam's Desktop Commander.
@@ -189,6 +245,125 @@ struct CommandOutput {
     stderr: String,
     stdout_truncated: bool,
     stderr_truncated: bool,
+}
+
+fn resolved_program_name(program: &str) -> String {
+    let requested = Path::new(program);
+    let resolved = if requested.components().count() > 1 {
+        fs::canonicalize(requested).ok()
+    } else {
+        std::env::var_os("PATH").and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|directory| directory.join(requested))
+                .find_map(|candidate| fs::canonicalize(candidate).ok())
+        })
+    };
+    resolved
+        .as_deref()
+        .and_then(Path::file_name)
+        .unwrap_or_else(|| requested.file_name().unwrap_or(requested.as_os_str()))
+        .to_string_lossy()
+        .to_ascii_lowercase()
+}
+
+fn blocked_command_reason(program: &str, args: &[String]) -> Option<String> {
+    let name = resolved_program_name(program);
+    let requested_name = Path::new(program)
+        .file_name()
+        .unwrap_or_else(|| Path::new(program).as_os_str())
+        .to_string_lossy()
+        .to_ascii_lowercase();
+    let is_blocked =
+        |candidate: &str| BLOCKED_COMMANDS.contains(&candidate) || candidate.starts_with("mkfs.");
+
+    if is_blocked(&name) || is_blocked(&requested_name) {
+        return Some(format!(
+            "'{program}' is blocked by the default system-command policy"
+        ));
+    }
+
+    // Catch common executable wrappers that would otherwise hide the real command.
+    let wrapped_program = if name == "busybox" || requested_name == "busybox" {
+        args.first().map(String::as_str)
+    } else if name == "env" || requested_name == "env" {
+        if args
+            .iter()
+            .any(|arg| arg == "-S" || arg == "--split-string")
+        {
+            return Some("'env -S' is blocked because it can hide the executed command".into());
+        }
+        let mut index = 0;
+        while index < args.len() {
+            let arg = &args[index];
+            if arg == "--" {
+                index += 1;
+                break;
+            }
+            if matches!(
+                arg.as_str(),
+                "-u" | "--unset" | "-C" | "--chdir" | "-a" | "--argv0"
+            ) {
+                index += 2;
+                continue;
+            }
+            if arg.starts_with('-') || (arg.contains('=') && !arg.starts_with('=')) {
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        args.get(index).map(String::as_str)
+    } else {
+        None
+    };
+    if let Some(wrapped) = wrapped_program {
+        let wrapped_name = resolved_program_name(wrapped);
+        let wrapped_requested = Path::new(wrapped)
+            .file_name()
+            .unwrap_or_else(|| Path::new(wrapped).as_os_str())
+            .to_string_lossy()
+            .to_ascii_lowercase();
+        if is_blocked(&wrapped_name) || is_blocked(&wrapped_requested) {
+            return Some(format!(
+                "'{program}' cannot be used to launch blocked command '{wrapped}'"
+            ));
+        }
+    }
+
+    // systemctl is useful for diagnostics, but lifecycle actions can end the session.
+    if name == "systemctl" || requested_name == "systemctl" {
+        if args.iter().any(|arg| {
+            matches!(
+                arg.to_ascii_lowercase().as_str(),
+                "poweroff" | "reboot" | "halt" | "suspend" | "hibernate" | "kexec" | "exit"
+            )
+        }) {
+            return Some(
+                "'systemctl' lifecycle actions are blocked by the default system-command policy"
+                    .into(),
+            );
+        }
+    }
+
+    if name == "loginctl" || requested_name == "loginctl" {
+        if args.iter().any(|arg| {
+            matches!(
+                arg.to_ascii_lowercase().as_str(),
+                "terminate-session"
+                    | "terminate-user"
+                    | "kill-session"
+                    | "kill-user"
+                    | "poweroff"
+                    | "reboot"
+                    | "suspend"
+                    | "hibernate"
+            )
+        }) {
+            return Some("'loginctl' session-control actions are blocked by the default system-command policy".into());
+        }
+    }
+
+    None
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -546,7 +721,7 @@ impl DesktopCommanderMcp {
     }
 
     #[tool(
-        description = "Run one executable directly (no shell) with separate arguments in an approved working directory. Requires the owner to enable MCP command execution in the desktop app and confirm=true for each run. Timeout is capped at 30 seconds; stdout and stderr are each capped at 256 KiB. Commands run with the desktop user's OS permissions and are not sandboxed."
+        description = "Run one executable directly (no shell) with separate arguments in an approved working directory. High-impact system administration, disk/partition, shutdown, firewall, and process-termination commands are blocked by default. Requires the owner to enable MCP command execution in the desktop app and confirm=true for each run. Timeout is capped at 30 seconds; stdout and stderr are each capped at 256 KiB. Commands run with the desktop user's OS permissions and are not sandboxed; this blocklist is a guardrail, not a security boundary."
     )]
     fn run_command(&self, Parameters(args): Parameters<RunCommandInput>) -> String {
         if !args.confirm {
@@ -1178,6 +1353,9 @@ impl DesktopCommanderMcp {
         if args.args.len() > 64 || args.args.iter().any(|arg| arg.len() > 8 * 1024) {
             return Err("Command arguments exceed the configured count or size limit".into());
         }
+        if let Some(reason) = blocked_command_reason(&args.program, &args.args) {
+            return Err(reason);
+        }
         let total_args: usize = args.args.iter().map(String::len).sum();
         if total_args > 32 * 1024 {
             return Err("Combined command arguments exceed 32 KiB".into());
@@ -1455,6 +1633,70 @@ mod tests {
     }
 
     #[test]
+    fn command_policy_blocks_high_impact_commands_and_allows_development_tools() {
+        for program in [
+            "sudo",
+            "/usr/bin/sudo",
+            "su",
+            "passwd",
+            "mkfs",
+            "mkfs.ext4",
+            "fdisk",
+            "dd",
+            "wipefs",
+            "shutdown",
+            "reboot",
+            "iptables",
+            "pkexec",
+            "kill",
+            "pkill",
+            "killall",
+        ] {
+            assert!(
+                blocked_command_reason(program, &[]).is_some(),
+                "expected {program} to be blocked"
+            );
+        }
+
+        assert!(blocked_command_reason("systemctl", &["reboot".into()]).is_some());
+        assert!(
+            blocked_command_reason("systemctl", &["--no-block".into(), "reboot".into()]).is_some()
+        );
+        assert!(blocked_command_reason("loginctl", &["terminate-session".into()]).is_some());
+        assert!(blocked_command_reason("env", &["sudo".into(), "id".into()]).is_some());
+        assert!(
+            blocked_command_reason("env", &["-i".into(), "PATH=/usr/bin".into(), "sudo".into()])
+                .is_some()
+        );
+        assert!(blocked_command_reason("busybox", &["sudo".into()]).is_some());
+        assert!(
+            blocked_command_reason(
+                "env",
+                &["--argv0".into(), "sudo".into(), format!("re{}", "boot")]
+            )
+            .is_some()
+        );
+        assert!(blocked_command_reason("env", &["-S".into(), "sudo reboot".into()]).is_some());
+        for program in [
+            "git", "npm", "node", "python", "pip", "cargo", "rustc", "curl", "wget",
+        ] {
+            assert!(
+                blocked_command_reason(program, &[]).is_none(),
+                "expected {program} to remain available"
+            );
+        }
+
+        if Path::new("/usr/bin/sudo").exists() {
+            let alias = std::env::temp_dir()
+                .join(format!("sam-blocked-command-alias-{}", std::process::id()));
+            let _ = fs::remove_file(&alias);
+            std::os::unix::fs::symlink("/usr/bin/sudo", &alias).expect("create sudo alias");
+            assert!(blocked_command_reason(alias.to_str().unwrap(), &[]).is_some());
+            fs::remove_file(alias).expect("remove sudo alias");
+        }
+    }
+
+    #[test]
     fn mcp_tools_respect_approved_roots_and_read_limits() {
         let (server, base) = test_server();
         let root = base.join("approved");
@@ -1690,6 +1932,14 @@ mod tests {
             confirm: false,
         });
         assert!(not_confirmed.is_err());
+        let blocked = server.run_command_inner(&RunCommandInput {
+            program: "sudo".into(),
+            args: vec!["true".into()],
+            cwd: root.to_string_lossy().into_owned(),
+            timeout_ms: Some(2_000),
+            confirm: true,
+        });
+        assert!(blocked.is_err());
 
         let terminal_id = server
             .start_terminal_inner(&StartTerminalInput {

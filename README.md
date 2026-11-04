@@ -15,7 +15,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - Persistent, explicitly approved folder roots.
 - Approved-folder browsing, bounded UTF-8 reads, line-range reads (including tail-style offsets), exact-count block editing, paginated recursive filename/content search, file metadata, and multi-file reads.
 - Separate per-folder write approval with an in-app text editor, new file/folder creation, append, copy, rename, and confirmed file deletion; the same guarded operations are exposed through MCP.
-- Opt-in one-shot MCP command execution with per-call confirmation, a 30-second timeout, bounded output, and no shell interpretation.
+- Opt-in one-shot MCP command execution with per-call confirmation, a 30-second timeout, bounded output, no shell interpretation, and a default blocklist for high-impact system commands.
 - Interactive MCP terminal sessions with explicit start/close, bounded input/output, and a three-session limit.
 - Current-user process inspection and confirmed SIGTERM controls, with the application and MCP processes protected.
 - Local activity history shared by desktop and MCP actions, without storing file contents or command arguments.

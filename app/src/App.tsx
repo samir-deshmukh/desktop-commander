@@ -320,7 +320,7 @@ function App() {
               <article><span>Available tools</span><strong>{mcpInfo?.tools.length ?? '—'}</strong></article>
             </div>
             <div className="command-access-card">
-              <div><h3>MCP command execution</h3><p>Runs one executable directly, without a shell, inside an approved working folder. It still runs with your normal Linux account permissions and is not sandboxed.</p></div>
+              <div><h3>MCP command execution</h3><p>Runs one executable directly, without a shell, inside an approved working folder. High-impact system, disk, shutdown, firewall, and process-control commands are blocked by default. This is a guardrail, not a sandbox.</p></div>
               <button className={commandExecutionEnabled ? 'command-disable' : 'command-enable'} onClick={() => void toggleCommandExecution()}>{commandExecutionEnabled ? 'Disable command access' : 'Enable command access'}</button>
               <span className={commandExecutionEnabled ? 'command-state enabled' : 'command-state'}>{commandExecutionEnabled ? 'ENABLED' : 'DISABLED BY DEFAULT'}</span>
             </div>
@@ -329,7 +329,7 @@ function App() {
               <pre className="mcp-config">{mcpInfo ? JSON.stringify({ mcpServers: { 'sams-desktop-commander': { command: mcpInfo.command, args: [] } } }, null, 2) : 'Loading executable path…'}</pre>
             </div>
             {mcpInfo && !mcpInfo.binary_exists && <p className="hint-copy">Build the local server from <code>app/src-tauri</code> with <code>CARGO_BUILD_JOBS=1 cargo build --no-default-features --features mcp --bin sam-desktop-mcp --locked</code>, then reopen this page.</p>}
-            <p className="hint-copy">The MCP process reloads folder permissions before each tool call. File writes require a separate writable-folder approval. File deletion, directory creation, and moves require explicit confirmation fields. The run_command MCP tool is disabled until you enable it here. Each call also requires confirmation, runs without shell interpretation, has a 30-second timeout and 256 KiB output caps. It still runs with your normal Linux account permissions; it is not a sandbox.</p>
+            <p className="hint-copy">The MCP process reloads folder permissions before each tool call. File writes require a separate writable-folder approval. File deletion, directory creation, and moves require explicit confirmation fields. The run_command MCP tool is disabled until you enable it here. Each call also requires confirmation, runs without shell interpretation, has a 30-second timeout and 256 KiB output caps. High-impact system administration, disk/partition, shutdown, firewall, and process-termination commands are blocked by default. Allowed programs still run with your normal Linux account permissions; this policy is not a sandbox.</p>
           </div> : active === 'Terminal' ? <div className="workspace-panel terminal-panel">
             <div className="workspace-toolbar"><div><h2>Interactive local terminal</h2><p>A real shell running as your desktop user, with keyboard input, terminal output, and resizing.</p></div><span className="terminal-safety">LOCAL PTY</span></div>
             {error && <p className="error-message" role="alert">{error}</p>}
