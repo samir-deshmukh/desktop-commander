@@ -10,7 +10,7 @@ Sam's Desktop Commander now includes a local Model Context Protocol (MCP) server
 - The desktop application does not need to stay open after folder approvals have been saved.
 - The MCP server reads the same approved_folders.json file as the desktop app and reloads it before every tool call.
 
-This is a local-client integration. Remote ChatGPT or other hosted clients cannot launch a process on this computer through STDIO; remote connectivity is a separate future phase that will require authenticated Streamable HTTP.
+This is a local-client integration. Hosted ChatGPT cannot launch a process on this computer directly through STDIO. For eligible ChatGPT workspaces, OpenAI Secure MCP Tunnel can bridge a local STDIO command without adding a public HTTP listener. See [ChatGPT remote integration](CHATGPT_INTEGRATION.md) for account requirements and the setup boundary.
 
 ## Build the server
 
@@ -80,4 +80,4 @@ python3 scripts/test-mcp-stdio.py
 
 The test uses temporary files and an isolated temporary `XDG_DATA_HOME`; it does not touch the user's real approvals. It requires only Python's standard library. Passing this test verifies the server's local protocol behavior, not compatibility with a specific AI application's configuration.
 
-Hosted ChatGPT cannot launch a local STDIO process on this computer. Testing the server from this ChatGPT conversation therefore means running this local protocol harness on the machine; it is not a live hosted ChatGPT-to-local-MCP connection. Remote access remains disabled pending a separate authenticated transport design.
+Hosted ChatGPT cannot launch a local STDIO process on this computer. Testing the server from this ChatGPT conversation therefore means running this local protocol harness on the machine; it is not a live hosted ChatGPT-to-local-MCP connection. For a future hosted connection, use OpenAI Secure MCP Tunnel with this STDIO binary; do not add a public listener. The tunnel remains disabled until the account, workspace, and Platform requirements in [ChatGPT remote integration](CHATGPT_INTEGRATION.md) are met.

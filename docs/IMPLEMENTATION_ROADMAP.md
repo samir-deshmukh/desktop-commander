@@ -41,7 +41,8 @@ Status labels distinguish existing foundation from planned work.
 
 ## Phase 5 — Packaging and remote access
 - [ ] Validate packaging, update/signing, and install/uninstall behavior.
-- [ ] Remote connectivity remains disabled until a separate threat-model and authentication design passes review.
+- [x] Verify current ChatGPT custom MCP requirements and select OpenAI Secure MCP Tunnel with the existing STDIO server; do not add a public listener.
+- [ ] Set up and verify the tunnel only when an eligible ChatGPT workspace, Platform tunnel, and runtime credentials are available.
 - [ ] Test resource usage and document limitations before calling the product production-ready.
 
 Each meaningful implementation change should be committed separately and accompanied by tests or an explicit reason tests are not applicable.

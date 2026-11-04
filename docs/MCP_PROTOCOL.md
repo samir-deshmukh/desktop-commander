@@ -39,4 +39,4 @@ For every supported client, record:
 - stderr/log behavior and process shutdown.
 
 ## Remote transport gate
-Streamable HTTP is not part of the initial local milestone. Before enabling it, verify the current MCP specification and SDK behavior, then design authentication, TLS, origin/host validation, explicit listener binding, rate limiting, access revocation, and abuse monitoring. Never expose an unauthenticated local MCP endpoint.
+Do not add a public HTTP listener for ChatGPT integration. OpenAI Secure MCP Tunnel supports forwarding to this local STDIO command over an outbound-only connection. See [ChatGPT remote integration](CHATGPT_INTEGRATION.md). Keep this disabled until an eligible ChatGPT workspace, Platform tunnel, and runtime key are available. Never expose an unauthenticated local MCP endpoint.

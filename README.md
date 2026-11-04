@@ -7,7 +7,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 **Phase:** Local desktop foundation, interactive PTY, read-only process inspection, and read-only MCP server
 **Initial platform:** Linux Mint (Ubuntu-based)
 **Initial mode:** Local-only
-**Remote access:** Out of scope until local security and core functionality are verified
+**Remote integration:** Architecture documented for OpenAI Secure MCP Tunnel; not enabled. ChatGPT Free cannot currently add custom MCP servers.
 
 ### Implemented so far
 
@@ -62,6 +62,7 @@ Tauri, Rust, React, and TypeScript are in the current implementation. Their depe
 - [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
 - [Local MCP client setup and protocol test](docs/local-mcp-clients.md)
 - [MCP protocol details and repeatable integration test](docs/MCP_PROTOCOL.md)
+- [ChatGPT remote integration requirements](docs/CHATGPT_INTEGRATION.md)
 
 ## Development approach
 

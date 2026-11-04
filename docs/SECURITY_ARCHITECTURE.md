@@ -39,8 +39,9 @@ Optional isolation (for example, a dedicated sandbox profile) is defense in dept
 
 ## MCP and networking
 - STDIO is the default local transport; it does not require a listening TCP port.
-- Do not wrap the local server in a public tunnel.
-- Remote transport is a separate future phase requiring authentication, encrypted transport, origin/host validation where applicable, explicit activation, rate limits, revocation, and threat-model review.
+- Do not expose a public HTTP listener or use a generic public tunnel.
+- For eligible OpenAI products, the documented remote path is OpenAI Secure MCP Tunnel forwarding to the local STDIO command over outbound HTTPS. It keeps the MCP server private; it does not replace filesystem authorization.
+- Keep tunnel operation opt-in. Store runtime credentials outside the repository and never log them.
 - MCP client identity alone is not authorization.
 
 ## Audit and privacy
