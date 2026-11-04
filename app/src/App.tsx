@@ -86,6 +86,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [terminalCwd, setTerminalCwd] = useState('');
   const [mcpInfo, setMcpInfo] = useState<McpInfo | null>(null);
+  const [commandExecutionEnabled, setCommandExecutionEnabled] = useState(false);
   const [processSnapshot, setProcessSnapshot] = useState<ProcessSnapshot | null>(null);
   const [processBusy, setProcessBusy] = useState(false);
 
@@ -112,8 +113,20 @@ function App() {
     void invoke<McpInfo>('mcp_server_info')
       .then((info) => { if (!cancelled) setMcpInfo(info); })
       .catch((e) => { if (!cancelled) setError(String(e)); });
+    void invoke<boolean>('command_execution_enabled')
+      .then((enabled) => { if (!cancelled) setCommandExecutionEnabled(enabled); })
+      .catch((e) => { if (!cancelled) setError(String(e)); });
     return () => { cancelled = true; };
   }, [active]);
+  const toggleCommandExecution = async () => {
+    const enabled = !commandExecutionEnabled;
+    if (enabled && !window.confirm('Allow connected MCP clients to start programs on this computer as your Linux user? Commands are not sandboxed and can access anything your account can access.')) return;
+    setError('');
+    try {
+      setCommandExecutionEnabled(await invoke<boolean>('set_command_execution_enabled', { enabled }));
+    } catch (e) { setError(String(e)); }
+  };
+
   const effectiveTerminalCwd = folders.includes(terminalCwd) ? terminalCwd : (folders[0] ?? '');
   const reportTerminalError = useCallback((message: string) => setError(message), []);
   const activeApprovedRoot = folders.find((root) => currentPath === root || currentPath.startsWith(root.endsWith('/') ? root : `${root}/`));
@@ -210,12 +223,17 @@ function App() {
               <article><span>Network listener</span><strong>Disabled</strong></article>
               <article><span>Available tools</span><strong>{mcpInfo?.tools.length ?? '—'}</strong></article>
             </div>
+            <div className="command-access-card">
+              <div><h3>MCP command execution</h3><p>Runs one executable directly, without a shell, inside an approved working folder. It still runs with your normal Linux account permissions and is not sandboxed.</p></div>
+              <button className={commandExecutionEnabled ? 'command-disable' : 'command-enable'} onClick={() => void toggleCommandExecution()}>{commandExecutionEnabled ? 'Disable command access' : 'Enable command access'}</button>
+              <span className={commandExecutionEnabled ? 'command-state enabled' : 'command-state'}>{commandExecutionEnabled ? 'ENABLED' : 'DISABLED BY DEFAULT'}</span>
+            </div>
             <div className="mcp-tools-list"><h3>Available MCP tools</h3>{(mcpInfo?.tools ?? ['list_approved_folders', 'list_directory', 'read_text_file']).map((tool) => <div key={tool}><code>{tool}</code><span>Available to connected clients</span></div>)}</div>
             <div className="mcp-config-section"><div><h3>Client configuration</h3><p>For MCP clients that accept the <code>mcpServers</code> JSON format, add this server entry to that client's configuration.</p></div>
               <pre className="mcp-config">{mcpInfo ? JSON.stringify({ mcpServers: { 'sams-desktop-commander': { command: mcpInfo.command, args: [] } } }, null, 2) : 'Loading executable path…'}</pre>
             </div>
             {mcpInfo && !mcpInfo.binary_exists && <p className="hint-copy">Build the local server from <code>app/src-tauri</code> with <code>CARGO_BUILD_JOBS=1 cargo build --no-default-features --features mcp --bin sam-desktop-mcp --locked</code>, then reopen this page.</p>}
-            <p className="hint-copy">The MCP process reloads folder permissions before each tool call. File writes require a separate writable-folder approval. File deletion, directory creation, and moves require explicit confirmation fields. Shell commands are not exposed over MCP yet; the local desktop terminal remains available.</p>
+            <p className="hint-copy">The MCP process reloads folder permissions before each tool call. File writes require a separate writable-folder approval. File deletion, directory creation, and moves require explicit confirmation fields. The run_command MCP tool is disabled until you enable it here. Each call also requires confirmation, runs without shell interpretation, has a 30-second timeout and 256 KiB output caps. It still runs with your normal Linux account permissions; it is not a sandbox.</p>
           </div> : active === 'Terminal' ? <div className="workspace-panel terminal-panel">
             <div className="workspace-toolbar"><div><h2>Interactive local terminal</h2><p>A real shell running as your desktop user, with keyboard input, terminal output, and resizing.</p></div><span className="terminal-safety">LOCAL PTY</span></div>
             {error && <p className="error-message" role="alert">{error}</p>}

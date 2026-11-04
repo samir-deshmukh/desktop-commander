@@ -61,6 +61,7 @@ Each AI application has its own configuration file and may use a different confi
 | create_directory | Create one directory inside a separately writable folder |
 | move_file | Move or rename one regular file inside writable folders |
 | delete_file | Delete one regular file after explicit confirmation |
+| run_command | Run one executable directly in an approved working directory, with bounded output and timeout |
 
 ## Permission boundaries
 
@@ -74,7 +75,9 @@ Each AI application has its own configuration file and may use a different confi
 - Existing files require overwrite=true; delete, move, and directory creation require confirm=true.
 - Delete only handles regular files; directory deletion and recursive deletion are not exposed.
 - Move refuses to overwrite an existing destination.
-- No arbitrary shell or terminal command is exposed over MCP yet.
+- MCP command execution is disabled by default and must be enabled in the desktop app. Each call also requires confirm=true.
+- Commands are launched directly without shell interpretation, with a 30-second timeout and 256 KiB caps for stdout and stderr.
+- Commands run with the desktop user's normal OS permissions; an approved working directory is not a sandbox. The tool does not provide interactive terminal sessions yet.
 - Do not expose this STDIO server through a network wrapper or public tunnel.
 
 ## Protocol implementation and local test

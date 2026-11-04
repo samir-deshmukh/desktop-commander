@@ -47,3 +47,11 @@ nav { display: grid; gap: 5px; }.nav-item { display: flex; align-items: center; 
 @media (max-width:650px) { .process-summary { flex-direction:column; }.process-table th,.process-table td { padding:9px 8px; font-size:9px; } }
 .write-toggle { border:1px solid #48543a; border-radius:5px; background:#20271a; color:#c7e97b; font-size:9px; padding:6px 8px; white-space:nowrap; }
 .write-toggle:hover { background:#2b3521; }
+.command-access-card { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px 16px; padding:15px; border:1px solid #343a31; border-radius:8px; background:#171b16; }
+.command-access-card h3 { margin:0 0 6px; color:#dce1e9; font-size:11px; }
+.command-access-card p { max-width:720px; margin:0; color:#858c99; font-size:10px; line-height:1.65; }
+.command-enable,.command-disable { border:1px solid #48543a; border-radius:6px; padding:8px 10px; background:#20271a; color:#c7e97b; font-size:9px; white-space:nowrap; }
+.command-disable { border-color:#694047; background:#2b1d22; color:#ffb4b4; }
+.command-state { grid-column:1/-1; color:#858c99; font:9px 'DM Mono',monospace; letter-spacing:.7px; }
+.command-state.enabled { color:#c7e97b; }
+@media (max-width:850px) { .command-access-card { grid-template-columns:1fr; }.command-access-card button { justify-self:start; } }

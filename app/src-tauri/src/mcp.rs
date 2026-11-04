@@ -5,9 +5,12 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     sync::Arc,
+    thread,
+    time::{Duration, Instant},
 };
 
 const APP_IDENTIFIER: &str = "com.samdeshmukh.desktopcommander";
@@ -80,6 +83,30 @@ struct MoveFileInput {
     confirm: bool,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct RunCommandInput {
+    /// Executable name or absolute executable path. The command runs directly, without a shell.
+    program: String,
+    /// Arguments passed as separate values (maximum 64).
+    args: Vec<String>,
+    /// Working directory inside a folder approved in the desktop app.
+    cwd: String,
+    /// Timeout in milliseconds (100-30000).
+    timeout_ms: Option<u64>,
+    /// Must be true to confirm running this command.
+    confirm: bool,
+}
+
+#[derive(Serialize)]
+struct CommandOutput {
+    exit_code: Option<i32>,
+    timed_out: bool,
+    stdout: String,
+    stderr: String,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+}
+
 #[derive(Serialize)]
 struct FileInfo {
     path: String,
@@ -100,6 +127,28 @@ struct DirectoryEntry {
 #[derive(Clone)]
 struct DesktopCommanderMcp {
     policy: Arc<AccessPolicy>,
+}
+
+fn read_capped_output(mut reader: impl Read) -> Result<(String, bool), String> {
+    const MAX_OUTPUT_BYTES: usize = 256 * 1024;
+    let mut output = Vec::with_capacity(MAX_OUTPUT_BYTES.min(8 * 1024));
+    let mut buffer = [0u8; 8 * 1024];
+    let mut truncated = false;
+    loop {
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|error| format!("Cannot read command output: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        let remaining = MAX_OUTPUT_BYTES.saturating_sub(output.len());
+        let keep = count.min(remaining);
+        output.extend_from_slice(&buffer[..keep]);
+        if keep < count {
+            truncated = true;
+        }
+    }
+    Ok((String::from_utf8_lossy(&output).into_owned(), truncated))
 }
 
 #[tool_router(server_handler)]
@@ -239,6 +288,20 @@ impl DesktopCommanderMcp {
             Err(error) => format!("ERROR: {error}"),
         }
     }
+
+    #[tool(
+        description = "Run one executable directly (no shell) with separate arguments in an approved working directory. Requires the owner to enable MCP command execution in the desktop app and confirm=true for each run. Timeout is capped at 30 seconds; stdout and stderr are each capped at 256 KiB. Commands run with the desktop user's OS permissions and are not sandboxed."
+    )]
+    fn run_command(&self, Parameters(args): Parameters<RunCommandInput>) -> String {
+        if !args.confirm {
+            return "ERROR: set confirm=true to run this command".into();
+        }
+        match self.run_command_inner(&args) {
+            Ok(output) => serde_json::to_string_pretty(&output)
+                .unwrap_or_else(|error| format!("ERROR: cannot serialize command output: {error}")),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
 }
 
 impl DesktopCommanderMcp {
@@ -334,6 +397,72 @@ impl DesktopCommanderMcp {
         }
         matches.sort();
         Ok(matches)
+    }
+
+    fn run_command_inner(&self, args: &RunCommandInput) -> Result<CommandOutput, String> {
+        if !args.confirm {
+            return Err("Set confirm=true to run this command".into());
+        }
+        if !self.policy.command_execution_allowed()? {
+            return Err("MCP command execution is disabled in the desktop app".into());
+        }
+        if args.program.trim().is_empty() || args.program.len() > 256 {
+            return Err("Executable name must contain 1-256 characters".into());
+        }
+        if args.args.len() > 64 || args.args.iter().any(|arg| arg.len() > 8 * 1024) {
+            return Err("Command arguments exceed the configured count or size limit".into());
+        }
+        let total_args: usize = args.args.iter().map(String::len).sum();
+        if total_args > 32 * 1024 {
+            return Err("Combined command arguments exceed 32 KiB".into());
+        }
+        let cwd = self.authorize_path(&args.cwd)?;
+        if !cwd.is_dir() {
+            return Err("Command working directory is not a directory".into());
+        }
+        let timeout = Duration::from_millis(args.timeout_ms.unwrap_or(10_000).clamp(100, 30_000));
+        let mut child = Command::new(&args.program)
+            .args(&args.args)
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("Cannot start command: {error}"))?;
+        let stdout = child.stdout.take().ok_or("Cannot capture command stdout")?;
+        let stderr = child.stderr.take().ok_or("Cannot capture command stderr")?;
+        let stdout_reader = thread::spawn(move || read_capped_output(stdout));
+        let stderr_reader = thread::spawn(move || read_capped_output(stderr));
+        let started = Instant::now();
+        let mut timed_out = false;
+        let status = loop {
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|error| format!("Cannot inspect command status: {error}"))?
+            {
+                break Some(status);
+            }
+            if started.elapsed() >= timeout {
+                timed_out = true;
+                let _ = child.kill();
+                break child.wait().ok();
+            }
+            thread::sleep(Duration::from_millis(20));
+        };
+        let (stdout, stdout_truncated) = stdout_reader
+            .join()
+            .map_err(|_| "Command stdout reader failed".to_string())??;
+        let (stderr, stderr_truncated) = stderr_reader
+            .join()
+            .map_err(|_| "Command stderr reader failed".to_string())??;
+        Ok(CommandOutput {
+            exit_code: status.and_then(|value| value.code()),
+            timed_out,
+            stdout,
+            stderr,
+            stdout_truncated,
+            stderr_truncated,
+        })
     }
 
     fn write_text_file_inner(&self, args: &WriteFileInput) -> Result<(), String> {
@@ -575,7 +704,8 @@ mod tests {
         let saved = serde_json::json!({
             "version": 1,
             "folders": [root.canonicalize().expect("canonical root").to_string_lossy()],
-            "writable_folders": [root.canonicalize().expect("canonical writable root").to_string_lossy()]
+            "writable_folders": [root.canonicalize().expect("canonical writable root").to_string_lossy()],
+            "command_execution_enabled": true
         });
         fs::write(
             &storage_file,
@@ -684,6 +814,46 @@ mod tests {
             .create_directory_inner(new_dir.to_str().unwrap())
             .unwrap();
         assert!(new_dir.is_dir());
+        let command = server
+            .run_command_inner(&RunCommandInput {
+                program: "pwd".into(),
+                args: Vec::new(),
+                cwd: root.to_string_lossy().into_owned(),
+                timeout_ms: Some(2_000),
+                confirm: true,
+            })
+            .unwrap();
+        assert_eq!(command.exit_code, Some(0));
+        assert!(command.stdout.trim().ends_with("approved"));
+        let timed_out = server
+            .run_command_inner(&RunCommandInput {
+                program: "sleep".into(),
+                args: vec!["1".into()],
+                cwd: root.to_string_lossy().into_owned(),
+                timeout_ms: Some(100),
+                confirm: true,
+            })
+            .unwrap();
+        assert!(timed_out.timed_out);
+        let capped = server
+            .run_command_inner(&RunCommandInput {
+                program: "head".into(),
+                args: vec!["-c".into(), "300000".into(), "/dev/zero".into()],
+                cwd: root.to_string_lossy().into_owned(),
+                timeout_ms: Some(2_000),
+                confirm: true,
+            })
+            .unwrap();
+        assert!(capped.stdout_truncated);
+        assert!(capped.stdout.len() <= 256 * 1024);
+        let not_confirmed = server.run_command_inner(&RunCommandInput {
+            program: "pwd".into(),
+            args: Vec::new(),
+            cwd: root.to_string_lossy().into_owned(),
+            timeout_ms: Some(2_000),
+            confirm: false,
+        });
+        assert!(not_confirmed.is_err());
 
         let large_file = root.join("large.txt");
         fs::write(&large_file, vec![b'x'; MAX_PREVIEW_BYTES as usize + 1])

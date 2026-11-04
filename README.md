@@ -15,6 +15,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - Persistent, explicitly approved folder roots.
 - Approved-folder browsing, bounded UTF-8 reads, recursive filename/content search, file metadata, and multi-file reads.
 - Separate per-folder write approval with bounded text writes, directory creation, file moves, and confirmed single-file deletion through MCP.
+- Opt-in one-shot MCP command execution with per-call confirmation, a 30-second timeout, bounded output, and no shell interpretation.
 - Interactive local PTY terminal using the desktop user's configured shell; the selected approved folder is only the initial working directory, not a sandbox.
 - Read-only process inspection for processes owned by the current Linux user, capped at 500 entries and excluding command-line arguments and environment variables.
 - Unit tests for approval persistence, filesystem authorization, bounded reads, and process metadata filtering.

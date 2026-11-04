@@ -51,6 +51,7 @@ struct TerminalSessions(Mutex<HashMap<String, PtySession>>);
 struct AccessPolicy {
     approved_roots: Mutex<Vec<PathBuf>>,
     writable_roots: Mutex<Vec<PathBuf>>,
+    command_execution_enabled: Mutex<bool>,
     storage_file: PathBuf,
 }
 
@@ -77,6 +78,8 @@ struct SavedApprovals {
     folders: Vec<String>,
     #[serde(default)]
     writable_folders: Vec<String>,
+    #[serde(default)]
+    command_execution_enabled: bool,
 }
 
 impl AccessPolicy {
@@ -84,6 +87,7 @@ impl AccessPolicy {
         let policy = Self {
             approved_roots: Mutex::new(Vec::new()),
             writable_roots: Mutex::new(Vec::new()),
+            command_execution_enabled: Mutex::new(false),
             storage_file,
         };
         policy.refresh()?;
@@ -93,9 +97,9 @@ impl AccessPolicy {
     // MCP runs in a separate process from the desktop UI. Reload the shared
     // permission file before every tool call so revocations take effect immediately.
     fn refresh(&self) -> Result<(), String> {
-        let loaded = (|| -> Result<(Vec<PathBuf>, Vec<PathBuf>), String> {
+        let loaded = (|| -> Result<(Vec<PathBuf>, Vec<PathBuf>, bool), String> {
             if !self.storage_file.exists() {
-                return Ok((Vec::new(), Vec::new()));
+                return Ok((Vec::new(), Vec::new(), false));
             }
             let contents = fs::read_to_string(&self.storage_file)
                 .map_err(|e| format!("Cannot read saved folder permissions: {e}"))?;
@@ -105,6 +109,7 @@ impl AccessPolicy {
                 return Err("Saved folder permissions use an unsupported version".into());
             }
 
+            let command_execution_enabled = saved.command_execution_enabled;
             let mut valid = Vec::new();
             for folder in saved.folders {
                 if let Ok(path) = canonical_directory(&folder) {
@@ -124,7 +129,7 @@ impl AccessPolicy {
                 }
             }
             writable.sort();
-            Ok((valid, writable))
+            Ok((valid, writable, command_execution_enabled))
         })();
 
         let mut roots = self
@@ -135,18 +140,33 @@ impl AccessPolicy {
             .writable_roots
             .lock()
             .map_err(|_| "Permission state unavailable")?;
+        let mut command_enabled = self
+            .command_execution_enabled
+            .lock()
+            .map_err(|_| "Permission state unavailable")?;
         match loaded {
-            Ok((valid, writable_valid)) => {
+            Ok((valid, writable_valid, command_valid)) => {
                 *roots = valid;
                 *writable = writable_valid;
+                *command_enabled = command_valid;
                 Ok(())
             }
             Err(error) => {
                 roots.clear();
                 writable.clear();
+                *command_enabled = false;
                 Err(error)
             }
         }
+    }
+
+    #[cfg(feature = "mcp")]
+    fn command_execution_allowed(&self) -> Result<bool, String> {
+        self.refresh()?;
+        self.command_execution_enabled
+            .lock()
+            .map(|enabled| *enabled)
+            .map_err(|_| "Permission state unavailable".into())
     }
 
     fn authorize_path(&self, path: &Path) -> Result<PathBuf, String> {
@@ -217,11 +237,20 @@ impl AccessPolicy {
             .lock()
             .map_err(|_| "Permission state unavailable")?
             .clone();
-        self.persist_with(roots, &writable)
+        let command_enabled = *self
+            .command_execution_enabled
+            .lock()
+            .map_err(|_| "Permission state unavailable")?;
+        self.persist_with(roots, &writable, command_enabled)
     }
 
     #[cfg(feature = "desktop")]
-    fn persist_with(&self, roots: &[PathBuf], writable: &[PathBuf]) -> Result<(), String> {
+    fn persist_with(
+        &self,
+        roots: &[PathBuf],
+        writable: &[PathBuf],
+        command_execution_enabled: bool,
+    ) -> Result<(), String> {
         let saved = SavedApprovals {
             version: 1,
             folders: roots
@@ -233,6 +262,7 @@ impl AccessPolicy {
                 .filter(|path| roots.contains(path))
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect(),
+            command_execution_enabled,
         };
         let contents = serde_json::to_vec_pretty(&saved)
             .map_err(|e| format!("Cannot serialize folder permissions: {e}"))?;
@@ -319,6 +349,7 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
             "create_directory",
             "delete_file",
             "move_file",
+            "run_command",
         ],
     })
 }
@@ -381,12 +412,49 @@ fn set_folder_write_access(
         updated.retain(|root| root != &canonical);
     }
     updated.sort();
-    policy.persist_with(&roots, &updated)?;
+    let command_enabled = *policy
+        .command_execution_enabled
+        .lock()
+        .map_err(|_| "Permission state unavailable")?;
+    policy.persist_with(&roots, &updated, command_enabled)?;
     *writable = updated.clone();
     Ok(updated
         .iter()
         .map(|root| root.to_string_lossy().into_owned())
         .collect())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn command_execution_enabled(policy: State<'_, AccessPolicy>) -> Result<bool, String> {
+    policy
+        .command_execution_enabled
+        .lock()
+        .map(|enabled| *enabled)
+        .map_err(|_| "Permission state unavailable".into())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn set_command_execution_enabled(
+    enabled: bool,
+    policy: State<'_, AccessPolicy>,
+) -> Result<bool, String> {
+    let roots = policy
+        .approved_roots
+        .lock()
+        .map_err(|_| "Permission state unavailable")?;
+    let writable = policy
+        .writable_roots
+        .lock()
+        .map_err(|_| "Permission state unavailable")?;
+    let mut current = policy
+        .command_execution_enabled
+        .lock()
+        .map_err(|_| "Permission state unavailable")?;
+    policy.persist_with(&roots, &writable, enabled)?;
+    *current = enabled;
+    Ok(enabled)
 }
 
 #[cfg(feature = "desktop")]
@@ -430,7 +498,11 @@ fn revoke_folder(path: String, policy: State<'_, AccessPolicy>) -> Result<Vec<St
             .filter(|root| updated.contains(root))
             .cloned()
             .collect();
-        policy.persist_with(&updated, &writable_updated)?;
+        let command_enabled = *policy
+            .command_execution_enabled
+            .lock()
+            .map_err(|_| "Permission state unavailable")?;
+        policy.persist_with(&updated, &writable_updated, command_enabled)?;
         *roots = updated;
         *writable = writable_updated;
     }
@@ -791,6 +863,8 @@ pub fn run() {
             approved_folders,
             writable_folders,
             set_folder_write_access,
+            command_execution_enabled,
+            set_command_execution_enabled,
             approve_folder,
             revoke_folder,
             list_folder,

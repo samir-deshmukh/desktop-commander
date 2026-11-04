@@ -128,7 +128,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "run_command"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -137,6 +137,14 @@ def main() -> int:
             )))
             assert roots == []
             passed.append("no folders approved by default")
+
+            disabled_command = response_text(client.request(
+                "tools/call", {"name": "run_command", "arguments": {
+                    "program": "pwd", "args": [], "cwd": str(approved), "confirm": True
+                }}
+            ))
+            assert "disabled in the desktop app" in disabled_command
+            passed.append("command execution disabled by default")
 
             denied = response_text(client.request(
                 "tools/call", {"name": "list_directory", "arguments": {"path": str(approved)}}
@@ -148,7 +156,7 @@ def main() -> int:
 
             canonical = str(approved.resolve())
             policy_file.write_text(
-                json.dumps({"version": 1, "folders": [canonical], "writable_folders": [canonical]}), encoding="utf-8"
+                json.dumps({"version": 1, "folders": [canonical], "writable_folders": [canonical], "command_execution_enabled": True}), encoding="utf-8"
             )
             roots = json.loads(response_text(client.request(
                 "tools/call", {"name": "list_approved_folders", "arguments": {}}
@@ -209,7 +217,7 @@ def main() -> int:
             passed.append("read approval does not grant write access")
 
             policy_file.write_text(
-                json.dumps({"version": 1, "folders": [canonical], "writable_folders": [canonical]}),
+                json.dumps({"version": 1, "folders": [canonical], "writable_folders": [canonical], "command_execution_enabled": True}),
                 encoding="utf-8",
             )
             written = response_text(client.request(
@@ -219,6 +227,15 @@ def main() -> int:
             ))
             assert "successfully" in written.lower() and created.read_text() == "created by MCP"
             passed.append("write with separate writable-root approval")
+
+            command_output = json.loads(response_text(client.request(
+                "tools/call", {"name": "run_command", "arguments": {
+                    "program": "pwd", "args": [], "cwd": canonical,
+                    "timeout_ms": 2_000, "confirm": True
+                }}
+            )))
+            assert command_output["exit_code"] == 0 and canonical in command_output["stdout"]
+            passed.append("confirmed command execution in approved working folder")
 
             denied_delete = response_text(client.request(
                 "tools/call", {"name": "delete_file", "arguments": {
