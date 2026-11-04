@@ -25,7 +25,8 @@ Status labels distinguish existing foundation from planned work.
 - [x] Integrate a PTY backend (`portable-pty`) and terminal renderer (`xterm.js`).
 - [x] Implement interactive shell sessions, input-size checks, terminal resize bounds, output events, and explicit close.
 - [x] Document that the shell runs as the desktop user and the selected approved directory is not a sandbox.
-- [ ] Add session-count limits, output/backpressure handling, and reliable cleanup on shell exit and app shutdown.
+- [x] Limit concurrent sessions, pace PTY output events, and kill/reap shells on close or app-state drop; reap sessions after shell exit.
+- [ ] Runtime-test cleanup behavior on app shutdown and inspect whether shell-spawned child processes persist.
 - [ ] Test close behavior, shell exit, resize, output floods, and child-process behavior in the running desktop app.
 - [ ] Add process inspection and carefully scoped termination with explicit confirmation.
 - [ ] Revisit whether any sensitive action approval can be enforced meaningfully; do not rely on command-string blacklists.
