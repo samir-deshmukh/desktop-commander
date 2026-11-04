@@ -57,6 +57,10 @@ Each AI application has its own configuration file and may use a different confi
 | get_file_info | Read basic metadata for an approved file or directory |
 | read_multiple_files | Read up to 10 approved UTF-8 files with a combined 4 MiB cap |
 | search_content | Search bounded UTF-8 file contents recursively inside an approved folder |
+| write_text_file | Create or replace a UTF-8 text file inside a separately writable folder |
+| create_directory | Create one directory inside a separately writable folder |
+| move_file | Move or rename one regular file inside writable folders |
+| delete_file | Delete one regular file after explicit confirmation |
 
 ## Permission boundaries
 
@@ -65,8 +69,12 @@ Each AI application has its own configuration file and may use a different confi
 - Direct symbolic-link paths are rejected; symbolic links found during directory listing are skipped.
 - Text reads are limited to 1 MiB.
 - Folder approvals are reloaded before every MCP request, so a revocation in the desktop app blocks the next request.
-- No MCP tool can write or delete files.
-- No arbitrary shell or terminal command is exposed.
+- Read approval and write approval are separate. A folder is read-only unless the owner explicitly enables changes in the desktop app.
+- Text writes are limited to 1 MiB and use a temporary sibling file followed by atomic rename.
+- Existing files require overwrite=true; delete, move, and directory creation require confirm=true.
+- Delete only handles regular files; directory deletion and recursive deletion are not exposed.
+- Move refuses to overwrite an existing destination.
+- No arbitrary shell or terminal command is exposed over MCP yet.
 - Do not expose this STDIO server through a network wrapper or public tunnel.
 
 ## Protocol implementation and local test

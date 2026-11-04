@@ -128,7 +128,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "search_files", "get_file_info", "read_multiple_files", "search_content"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -148,7 +148,7 @@ def main() -> int:
 
             canonical = str(approved.resolve())
             policy_file.write_text(
-                json.dumps({"version": 1, "folders": [canonical]}), encoding="utf-8"
+                json.dumps({"version": 1, "folders": [canonical], "writable_folders": [canonical]}), encoding="utf-8"
             )
             roots = json.loads(response_text(client.request(
                 "tools/call", {"name": "list_approved_folders", "arguments": {}}
@@ -195,6 +195,64 @@ def main() -> int:
             )))
             assert any(path.endswith("hello.txt") for path in content_search)
             passed.append("bounded file-content search")
+
+            created = approved / "created-by-mcp.txt"
+            policy_file.write_text(
+                json.dumps({"version": 1, "folders": [canonical]}), encoding="utf-8"
+            )
+            denied_write = response_text(client.request(
+                "tools/call", {"name": "write_text_file", "arguments": {
+                    "path": str(created), "content": "must be denied", "overwrite": False
+                }}
+            ))
+            assert "not explicitly approved" in denied_write
+            passed.append("read approval does not grant write access")
+
+            policy_file.write_text(
+                json.dumps({"version": 1, "folders": [canonical], "writable_folders": [canonical]}),
+                encoding="utf-8",
+            )
+            written = response_text(client.request(
+                "tools/call", {"name": "write_text_file", "arguments": {
+                    "path": str(created), "content": "created by MCP", "overwrite": False
+                }}
+            ))
+            assert "successfully" in written.lower() and created.read_text() == "created by MCP"
+            passed.append("write with separate writable-root approval")
+
+            denied_delete = response_text(client.request(
+                "tools/call", {"name": "delete_file", "arguments": {
+                    "path": str(created), "confirm": False
+                }}
+            ))
+            assert "confirm=true" in denied_delete
+            passed.append("destructive operation confirmation")
+
+            new_dir = approved / "new-folder"
+            made_dir = response_text(client.request(
+                "tools/call", {"name": "create_directory", "arguments": {
+                    "path": str(new_dir), "confirm": True
+                }}
+            ))
+            assert "successfully" in made_dir.lower() and new_dir.is_dir()
+            passed.append("approved directory creation")
+
+            moved = approved / "renamed-by-mcp.txt"
+            moved_result = response_text(client.request(
+                "tools/call", {"name": "move_file", "arguments": {
+                    "source": str(created), "destination": str(moved), "confirm": True
+                }}
+            ))
+            assert "successfully" in moved_result.lower() and moved.exists() and not created.exists()
+            passed.append("confirmed file move")
+
+            deleted = response_text(client.request(
+                "tools/call", {"name": "delete_file", "arguments": {
+                    "path": str(moved), "confirm": True
+                }}
+            ))
+            assert "successfully" in deleted.lower() and not moved.exists()
+            passed.append("confirmed file deletion")
 
             denied = response_text(client.request(
                 "tools/call", {"name": "read_text_file", "arguments": {"path": str(outside)}}

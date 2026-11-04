@@ -45,3 +45,5 @@ nav { display: grid; gap: 5px; }.nav-item { display: flex; align-items: center; 
 .process-table td:nth-child(2) { color:#d8f36a; }
 .process-table tbody tr:last-child td { border-bottom:0; }
 @media (max-width:650px) { .process-summary { flex-direction:column; }.process-table th,.process-table td { padding:9px 8px; font-size:9px; } }
+.write-toggle { border:1px solid #48543a; border-radius:5px; background:#20271a; color:#c7e97b; font-size:9px; padding:6px 8px; white-space:nowrap; }
+.write-toggle:hover { background:#2b3521; }

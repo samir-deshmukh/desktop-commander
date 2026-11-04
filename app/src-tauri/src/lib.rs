@@ -50,6 +50,7 @@ struct TerminalSessions(Mutex<HashMap<String, PtySession>>);
 
 struct AccessPolicy {
     approved_roots: Mutex<Vec<PathBuf>>,
+    writable_roots: Mutex<Vec<PathBuf>>,
     storage_file: PathBuf,
 }
 
@@ -74,12 +75,15 @@ struct FolderEntry {
 struct SavedApprovals {
     version: u32,
     folders: Vec<String>,
+    #[serde(default)]
+    writable_folders: Vec<String>,
 }
 
 impl AccessPolicy {
     fn load(storage_file: PathBuf) -> Result<Self, String> {
         let policy = Self {
             approved_roots: Mutex::new(Vec::new()),
+            writable_roots: Mutex::new(Vec::new()),
             storage_file,
         };
         policy.refresh()?;
@@ -89,9 +93,9 @@ impl AccessPolicy {
     // MCP runs in a separate process from the desktop UI. Reload the shared
     // permission file before every tool call so revocations take effect immediately.
     fn refresh(&self) -> Result<(), String> {
-        let loaded = (|| -> Result<Vec<PathBuf>, String> {
+        let loaded = (|| -> Result<(Vec<PathBuf>, Vec<PathBuf>), String> {
             if !self.storage_file.exists() {
-                return Ok(Vec::new());
+                return Ok((Vec::new(), Vec::new()));
             }
             let contents = fs::read_to_string(&self.storage_file)
                 .map_err(|e| format!("Cannot read saved folder permissions: {e}"))?;
@@ -110,21 +114,36 @@ impl AccessPolicy {
                 }
             }
             valid.sort();
-            Ok(valid)
+
+            let mut writable = Vec::new();
+            for folder in saved.writable_folders {
+                if let Ok(path) = canonical_directory(&folder) {
+                    if valid.contains(&path) && !writable.contains(&path) {
+                        writable.push(path);
+                    }
+                }
+            }
+            writable.sort();
+            Ok((valid, writable))
         })();
 
         let mut roots = self
             .approved_roots
             .lock()
             .map_err(|_| "Permission state unavailable")?;
+        let mut writable = self
+            .writable_roots
+            .lock()
+            .map_err(|_| "Permission state unavailable")?;
         match loaded {
-            Ok(valid) => {
+            Ok((valid, writable_valid)) => {
                 *roots = valid;
+                *writable = writable_valid;
                 Ok(())
             }
             Err(error) => {
-                // Fail closed: never retain permissions from an older valid file.
                 roots.clear();
+                writable.clear();
                 Err(error)
             }
         }
@@ -149,12 +168,69 @@ impl AccessPolicy {
         Ok(target)
     }
 
+    #[cfg(feature = "mcp")]
+    fn authorize_write_target(&self, path: &Path) -> Result<PathBuf, String> {
+        self.refresh()?;
+        let parent = path
+            .parent()
+            .ok_or("Write target must have a parent directory")?;
+        let name = path
+            .file_name()
+            .ok_or("Write target must have a file or directory name")?;
+        if name == "." || name == ".." {
+            return Err("Invalid write target name".into());
+        }
+        let canonical_parent = parent
+            .canonicalize()
+            .map_err(|error| format!("Cannot resolve write target parent: {error}"))?;
+        if !canonical_parent.is_dir() {
+            return Err("Write target parent is not a directory".into());
+        }
+        let writable = self
+            .writable_roots
+            .lock()
+            .map_err(|_| "Permission state unavailable")?;
+        if !writable
+            .iter()
+            .any(|root| canonical_parent.starts_with(root))
+        {
+            return Err(
+                "Write denied: parent directory is not explicitly approved for changes".into(),
+            );
+        }
+        let target = canonical_parent.join(name);
+        match fs::symlink_metadata(&target) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                Err("Write denied: symbolic links cannot be modified".into())
+            }
+            Ok(metadata) if metadata.is_dir() => Err("Write target is a directory".into()),
+            Ok(_) => Ok(target),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(target),
+            Err(error) => Err(format!("Cannot inspect write target: {error}")),
+        }
+    }
+
     #[cfg(feature = "desktop")]
     fn persist(&self, roots: &[PathBuf]) -> Result<(), String> {
+        let writable = self
+            .writable_roots
+            .lock()
+            .map_err(|_| "Permission state unavailable")?
+            .clone();
+        self.persist_with(roots, &writable)
+    }
+
+    #[cfg(feature = "desktop")]
+    fn persist_with(&self, roots: &[PathBuf], writable: &[PathBuf]) -> Result<(), String> {
         let saved = SavedApprovals {
             version: 1,
             folders: roots
                 .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect(),
+            writable_folders: writable
+                .iter()
+                .filter(|path| roots.contains(path))
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect(),
         };
@@ -239,6 +315,10 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
             "get_file_info",
             "read_multiple_files",
             "search_content",
+            "write_text_file",
+            "create_directory",
+            "delete_file",
+            "move_file",
         ],
     })
 }
@@ -259,6 +339,53 @@ fn approved_folders(policy: State<'_, AccessPolicy>) -> Result<Vec<String>, Stri
     Ok(roots
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
+        .collect())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn writable_folders(policy: State<'_, AccessPolicy>) -> Result<Vec<String>, String> {
+    let roots = policy
+        .writable_roots
+        .lock()
+        .map_err(|_| "Permission state unavailable")?;
+    Ok(roots
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn set_folder_write_access(
+    path: String,
+    enabled: bool,
+    policy: State<'_, AccessPolicy>,
+) -> Result<Vec<String>, String> {
+    let canonical = canonical_directory(&path)?;
+    let roots = policy
+        .approved_roots
+        .lock()
+        .map_err(|_| "Permission state unavailable")?;
+    if !roots.contains(&canonical) {
+        return Err("Folder must be approved for read access first".into());
+    }
+    let mut writable = policy
+        .writable_roots
+        .lock()
+        .map_err(|_| "Permission state unavailable")?;
+    let mut updated = writable.clone();
+    if enabled && !updated.contains(&canonical) {
+        updated.push(canonical);
+    } else if !enabled {
+        updated.retain(|root| root != &canonical);
+    }
+    updated.sort();
+    policy.persist_with(&roots, &updated)?;
+    *writable = updated.clone();
+    Ok(updated
+        .iter()
+        .map(|root| root.to_string_lossy().into_owned())
         .collect())
 }
 
@@ -294,8 +421,18 @@ fn revoke_folder(path: String, policy: State<'_, AccessPolicy>) -> Result<Vec<St
     let mut updated = roots.clone();
     updated.retain(|root| root.to_string_lossy() != path);
     if updated.len() != roots.len() {
-        policy.persist(&updated)?;
+        let mut writable = policy
+            .writable_roots
+            .lock()
+            .map_err(|_| "Permission state unavailable")?;
+        let writable_updated: Vec<PathBuf> = writable
+            .iter()
+            .filter(|root| updated.contains(root))
+            .cloned()
+            .collect();
+        policy.persist_with(&updated, &writable_updated)?;
         *roots = updated;
+        *writable = writable_updated;
     }
     Ok(roots
         .iter()
@@ -652,6 +789,8 @@ pub fn run() {
             mcp_server_info,
             list_processes,
             approved_folders,
+            writable_folders,
+            set_folder_write_access,
             approve_folder,
             revoke_folder,
             list_folder,
@@ -679,6 +818,107 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
+}
+
+#[cfg(all(test, feature = "mcp"))]
+mod write_permission_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn legacy_approvals_remain_read_only() {
+        let base = std::env::temp_dir().join(format!("sam-legacy-policy-{}", std::process::id()));
+        let root = base.join("approved");
+        let storage = base.join("approved_folders.json");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&root).expect("create approved root");
+        let canonical = root.canonicalize().expect("canonical root");
+        fs::write(
+            &storage,
+            serde_json::json!({
+                "version": 1,
+                "folders": [canonical.to_string_lossy()]
+            })
+            .to_string(),
+        )
+        .expect("write legacy policy");
+
+        let policy = AccessPolicy::load(storage).expect("load legacy policy");
+        assert_eq!(
+            policy
+                .writable_roots
+                .lock()
+                .expect("lock write roots")
+                .len(),
+            0,
+            "older approval files must not silently gain write access"
+        );
+        assert!(
+            policy
+                .authorize_write_target(&root.join("new.txt"))
+                .is_err()
+        );
+        fs::remove_dir_all(base).expect("cleanup test directory");
+    }
+
+    #[test]
+    fn write_authorization_requires_a_separate_root_and_rejects_symlinks() {
+        let base = std::env::temp_dir().join(format!("sam-write-policy-{}", std::process::id()));
+        let root = base.join("approved");
+        let outside = base.join("outside");
+        let storage = base.join("approved_folders.json");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&root).expect("create approved root");
+        fs::create_dir_all(&outside).expect("create outside root");
+        let canonical = root.canonicalize().expect("canonical root");
+        fs::write(
+            &storage,
+            serde_json::json!({
+                "version": 1,
+                "folders": [canonical.to_string_lossy()]
+            })
+            .to_string(),
+        )
+        .expect("write read-only policy");
+
+        let policy = AccessPolicy::load(storage.clone()).expect("load policy");
+        let new_file = root.join("new.txt");
+        assert!(policy.authorize_write_target(&new_file).is_err());
+
+        fs::write(
+            &storage,
+            serde_json::json!({
+                "version": 1,
+                "folders": [canonical.to_string_lossy()],
+                "writable_folders": [canonical.to_string_lossy()]
+            })
+            .to_string(),
+        )
+        .expect("write writable policy");
+        policy.refresh().expect("reload write approval");
+        assert_eq!(
+            policy
+                .authorize_write_target(&new_file)
+                .expect("authorize new file"),
+            new_file
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let linked_parent = root.join("outside-link");
+            symlink(&outside, &linked_parent).expect("create outside directory symlink");
+            assert!(
+                policy
+                    .authorize_write_target(&linked_parent.join("escape.txt"))
+                    .is_err()
+            );
+            let linked_file = root.join("linked-file.txt");
+            symlink(outside.join("target.txt"), &linked_file).expect("create file symlink");
+            assert!(policy.authorize_write_target(&linked_file).is_err());
+        }
+        fs::remove_dir_all(base).expect("cleanup test directory");
+    }
 }
 
 #[cfg(test)]

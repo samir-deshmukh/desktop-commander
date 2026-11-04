@@ -4,7 +4,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 ## Project status
 
-**Phase:** Local desktop foundation, interactive PTY, read-only process inspection, and read-only MCP server
+**Phase:** Local desktop foundation, interactive PTY, read-only process inspection, and permissioned filesystem MCP tools
 **Initial platform:** Linux Mint (Ubuntu-based)
 **Initial mode:** Local-only
 **Remote integration:** Architecture documented for OpenAI Secure MCP Tunnel; not enabled. ChatGPT Free cannot currently add custom MCP servers.
@@ -13,7 +13,8 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 - Tauri 2 + React + TypeScript desktop shell.
 - Persistent, explicitly approved folder roots.
-- Read-only directory browsing and bounded UTF-8 text previews.
+- Approved-folder browsing, bounded UTF-8 reads, recursive filename/content search, file metadata, and multi-file reads.
+- Separate per-folder write approval with bounded text writes, directory creation, file moves, and confirmed single-file deletion through MCP.
 - Interactive local PTY terminal using the desktop user's configured shell; the selected approved folder is only the initial working directory, not a sandbox.
 - Read-only process inspection for processes owned by the current Linux user, capped at 500 entries and excluding command-line arguments and environment variables.
 - Unit tests for approval persistence, filesystem authorization, bounded reads, and process metadata filtering.

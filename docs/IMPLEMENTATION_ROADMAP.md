@@ -19,10 +19,12 @@ Status labels distinguish existing foundation from planned work.
 - [x] Document how approval state is persisted and protected, including the same-user limitation.
 
 ## Phase 2 — Controlled file changes
-- [ ] Design separate read/write/delete permissions.
-- [ ] Add preview and explicit confirmation for destructive changes.
-- [ ] Define atomic write, overwrite, backup, and recovery semantics.
-- [ ] Add audit events and tests before exposing mutation tools.
+- [x] Design separate read and write permissions; read-only remains the default.
+- [x] Require explicit confirmation fields for destructive MCP operations.
+- [x] Add bounded UTF-8 writes using a temporary sibling file and atomic rename; require overwrite=true for existing files.
+- [x] Restrict delete to individual regular files and refuse move destination overwrites.
+- [x] Add isolated integration coverage for read-only denial, write approval, create, move, delete, and confirmation checks.
+- [ ] Add persistent audit events and a recovery/backup workflow before expanding mutation capabilities.
 
 ## Phase 3 — Terminal and processes
 - [x] Integrate a PTY backend (`portable-pty`) and terminal renderer (`xterm.js`).

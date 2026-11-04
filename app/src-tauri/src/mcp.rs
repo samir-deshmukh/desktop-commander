@@ -5,6 +5,7 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -49,6 +50,34 @@ struct ContentSearchInput {
     query: String,
     /// Maximum matching files to return (1-100).
     max_results: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct WriteFileInput {
+    /// Absolute file path inside a folder separately approved for changes.
+    path: String,
+    /// UTF-8 text to write (maximum 1 MiB).
+    content: String,
+    /// Must be true to replace an existing regular file.
+    overwrite: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ConfirmPathInput {
+    /// Absolute path inside a folder separately approved for changes.
+    path: String,
+    /// Must be true to confirm the requested change.
+    confirm: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MoveFileInput {
+    /// Existing regular file inside a folder approved for changes.
+    source: String,
+    /// New path inside a folder approved for changes. Destination must not exist.
+    destination: String,
+    /// Must be true to confirm moving the file.
+    confirm: bool,
 }
 
 #[derive(Serialize)]
@@ -161,6 +190,55 @@ impl DesktopCommanderMcp {
             Err(error) => format!("ERROR: {error}"),
         }
     }
+
+    #[tool(
+        description = "Write UTF-8 text to a file in a folder explicitly enabled for changes. Maximum 1 MiB. Replacing an existing file requires overwrite=true; writes use a temporary sibling file and atomic rename."
+    )]
+    fn write_text_file(&self, Parameters(args): Parameters<WriteFileInput>) -> String {
+        match self.write_text_file_inner(&args) {
+            Ok(()) => "File written successfully".into(),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Create one directory inside a folder explicitly enabled for changes. Parent must already exist; requires confirm=true."
+    )]
+    fn create_directory(&self, Parameters(args): Parameters<ConfirmPathInput>) -> String {
+        if !args.confirm {
+            return "ERROR: set confirm=true to create this directory".into();
+        }
+        match self.create_directory_inner(&args.path) {
+            Ok(()) => "Directory created successfully".into(),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Delete one regular file inside a folder explicitly enabled for changes. Directories and symbolic links are rejected. Requires confirm=true; deletion is permanent."
+    )]
+    fn delete_file(&self, Parameters(args): Parameters<ConfirmPathInput>) -> String {
+        if !args.confirm {
+            return "ERROR: set confirm=true to delete this file".into();
+        }
+        match self.delete_file_inner(&args.path) {
+            Ok(()) => "File deleted successfully".into(),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Move or rename one regular file between folders explicitly enabled for changes. Destination must not exist. Requires confirm=true."
+    )]
+    fn move_file(&self, Parameters(args): Parameters<MoveFileInput>) -> String {
+        if !args.confirm {
+            return "ERROR: set confirm=true to move this file".into();
+        }
+        match self.move_file_inner(&args.source, &args.destination) {
+            Ok(()) => "File moved successfully".into(),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
 }
 
 impl DesktopCommanderMcp {
@@ -256,6 +334,82 @@ impl DesktopCommanderMcp {
         }
         matches.sort();
         Ok(matches)
+    }
+
+    fn write_text_file_inner(&self, args: &WriteFileInput) -> Result<(), String> {
+        if args.content.len() as u64 > MAX_PREVIEW_BYTES {
+            return Err(format!(
+                "Text content exceeds the {MAX_PREVIEW_BYTES}-byte limit"
+            ));
+        }
+        let target = self.policy.authorize_write_target(Path::new(&args.path))?;
+        let exists = target.exists();
+        if exists && !args.overwrite {
+            return Err("File already exists; set overwrite=true to replace it".into());
+        }
+        if exists
+            && !fs::symlink_metadata(&target)
+                .map_err(|error| format!("Cannot inspect existing file: {error}"))?
+                .is_file()
+        {
+            return Err("Only regular files can be overwritten".into());
+        }
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let temporary =
+            target.with_file_name(format!(".sam-commander-{}-{nonce}.tmp", std::process::id()));
+        let result = (|| -> Result<(), String> {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+                .map_err(|error| format!("Cannot create temporary file: {error}"))?;
+            file.write_all(args.content.as_bytes())
+                .map_err(|error| format!("Cannot write temporary file: {error}"))?;
+            file.sync_all()
+                .map_err(|error| format!("Cannot sync temporary file: {error}"))?;
+            fs::rename(&temporary, &target)
+                .map_err(|error| format!("Cannot finalize file write: {error}"))?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+
+    fn create_directory_inner(&self, path: &str) -> Result<(), String> {
+        let target = self.policy.authorize_write_target(Path::new(path))?;
+        fs::create_dir(&target).map_err(|error| format!("Cannot create directory: {error}"))
+    }
+
+    fn delete_file_inner(&self, path: &str) -> Result<(), String> {
+        let target = self.policy.authorize_write_target(Path::new(path))?;
+        let metadata = fs::symlink_metadata(&target)
+            .map_err(|error| format!("Cannot inspect file to delete: {error}"))?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(
+                "Only regular files can be deleted; directories and symbolic links are rejected"
+                    .into(),
+            );
+        }
+        fs::remove_file(&target).map_err(|error| format!("Cannot delete file: {error}"))
+    }
+
+    fn move_file_inner(&self, source: &str, destination: &str) -> Result<(), String> {
+        let source = self.policy.authorize_write_target(Path::new(source))?;
+        let metadata = fs::symlink_metadata(&source)
+            .map_err(|error| format!("Cannot inspect source file: {error}"))?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err("Only regular files can be moved".into());
+        }
+        let destination = self.policy.authorize_write_target(Path::new(destination))?;
+        if destination.exists() {
+            return Err("Destination already exists; refusing to overwrite".into());
+        }
+        fs::rename(&source, &destination).map_err(|error| format!("Cannot move file: {error}"))
     }
 
     fn read_multiple_files_inner(&self, paths: &[String]) -> Result<Vec<(String, String)>, String> {
@@ -420,7 +574,8 @@ mod tests {
         let storage_file = base.join("approvals.json");
         let saved = serde_json::json!({
             "version": 1,
-            "folders": [root.canonicalize().expect("canonical root").to_string_lossy()]
+            "folders": [root.canonicalize().expect("canonical root").to_string_lossy()],
+            "writable_folders": [root.canonicalize().expect("canonical writable root").to_string_lossy()]
         });
         fs::write(
             &storage_file,
@@ -490,6 +645,46 @@ mod tests {
                 .iter()
                 .any(|path| path.ends_with("note.txt"))
         );
+
+        let created = root.join("created.txt");
+        server
+            .write_text_file_inner(&WriteFileInput {
+                path: created.to_string_lossy().into_owned(),
+                content: "created safely".into(),
+                overwrite: false,
+            })
+            .unwrap();
+        assert_eq!(fs::read_to_string(&created).unwrap(), "created safely");
+        assert!(
+            server
+                .write_text_file_inner(&WriteFileInput {
+                    path: created.to_string_lossy().into_owned(),
+                    content: "replace".into(),
+                    overwrite: false,
+                })
+                .is_err()
+        );
+        server
+            .write_text_file_inner(&WriteFileInput {
+                path: created.to_string_lossy().into_owned(),
+                content: "replaced".into(),
+                overwrite: true,
+            })
+            .unwrap();
+        assert_eq!(fs::read_to_string(&created).unwrap(), "replaced");
+        let moved = root.join("moved.txt");
+        server
+            .move_file_inner(created.to_str().unwrap(), moved.to_str().unwrap())
+            .unwrap();
+        assert!(!created.exists() && moved.exists());
+        server.delete_file_inner(moved.to_str().unwrap()).unwrap();
+        assert!(!moved.exists());
+        let new_dir = root.join("new-dir");
+        server
+            .create_directory_inner(new_dir.to_str().unwrap())
+            .unwrap();
+        assert!(new_dir.is_dir());
+
         let large_file = root.join("large.txt");
         fs::write(&large_file, vec![b'x'; MAX_PREVIEW_BYTES as usize + 1])
             .expect("write oversized test file");
