@@ -15,13 +15,16 @@ Sam's Desktop Commander MCP host
         |
         +-- Policy and approval layer
         |       +-- approved filesystem roots
-        |       +-- command rules
+        |       +-- filesystem approvals
+        |       +-- one-shot command policy and confirmations
+        |       +-- process-control protections
         |       +-- action audit records
         |
         +-- Capability modules
-        |       +-- filesystem (first)
-        |       +-- terminal (restricted read-only command runner initially)
-        |       +-- process control (later)
+        |       +-- filesystem
+        |       +-- one-shot MCP command runner
+        |       +-- interactive local PTY
+        |       +-- process inspection and confirmed termination
         |       +-- desktop automation (later)
         |
         +-- OS integration (Linux)
@@ -43,7 +46,9 @@ The UI and MCP server should call the same Rust capability and policy layer. Avo
 - Default: no approved user folders.
 - Filesystem access: canonicalize the requested path and ensure the final target remains within an approved root. MCP directory listing skips symbolic links; direct symbolic-link paths are rejected. MCP text reads are UTF-8 only and capped at 1 MiB. Permissions are reloaded before each MCP tool call. Re-check before future writes and deletes to reduce time-of-check/time-of-use risk.
 - Read, create/update, and delete permissions should be separable.
-- Terminal: the initial UI exposes only a fixed allowlist of read-only diagnostic and Git inspection commands. Commands are mapped to executable + argument arrays; no shell is invoked and arbitrary user command text is rejected. Full interactive execution remains disabled until command-level permissions, approvals, process limits, and audit history are designed. Do not rely only on a blacklist; shell syntax, wrappers, and child processes make blacklist-only controls insufficient.
+- Interactive terminal: the desktop UI exposes a local PTY using the desktop user's configured shell. It runs with the user's normal OS permissions. An approved folder is only the starting working directory, not a sandbox. The one-shot MCP command blocklist does not apply to this interactive shell.
+- One-shot MCP command runner: launches an executable with a separate argv array (no shell parsing), requires command access to be enabled and per-call confirmation, and applies a default blocklist to selected high-impact system, account, disk, shutdown, firewall, and process-control commands. This is an accidental-use guardrail, not a security boundary: allowed interpreters and programs can execute arbitrary code or launch other programs. Never claim that a command blacklist makes execution safe or sandboxed.
+- Process control: process inspection is limited to the current OS user and omits command-line arguments and environment values. Termination requires confirmation and rejects protected desktop-session, login, PID 1, application, and MCP processes. Process-exit race testing remains outstanding.
 - Destructive and privileged actions require explicit approval. The application must not silently elevate privileges.
 - Audit log records tool, time, decision, and bounded result metadata; avoid storing secrets or full sensitive file contents.
 
@@ -55,8 +60,8 @@ The UI and MCP server should call the same Rust capability and policy layer. Avo
 4. Add MCP initialization and STDIO transport using the official `rmcp` SDK — complete.
 5. Add approved-root filesystem listing/reading and tests for path traversal, symlink rejection, size limits, and live revocation — complete.
 6. Add writes only after the read-only policy is verified.
-7. Add command execution and process management with approvals.
-8. Evaluate desktop automation against the active X11/Wayland session; document capability limits.
+7. Add opt-in MCP command execution, interactive PTY sessions, process inspection, and confirmed process termination; continue lifecycle and race testing.
+8. Evaluate desktop automation against the active X11/Wayland session; document capability limits before implementing input control.
 9. Add client-specific connection guides and test each client instead of assuming universal support.
 
 ## 6. Initial module layout (target)
