@@ -4,7 +4,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 ## Project status
 
-**Phase:** Local desktop foundation with permissioned filesystem, interactive terminal, process management, and MCP activity history
+**Phase:** Local desktop foundation with permissioned filesystem, interactive terminal, process management, read-only accessibility inspection, and MCP activity history
 **Initial platform:** Linux Mint (Ubuntu-based)
 **Initial mode:** Local-only
 **Remote integration:** Architecture documented for OpenAI Secure MCP Tunnel; not enabled. ChatGPT Free cannot currently add custom MCP servers.
@@ -18,6 +18,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - Opt-in one-shot MCP command execution with per-call confirmation, a 30-second timeout, bounded output, no shell interpretation, and a default blocklist for high-impact system commands.
 - Interactive MCP terminal sessions with explicit start/close, bounded input/output, and a three-session limit.
 - Current-user process inspection and confirmed SIGTERM controls, with the application and MCP processes protected.
+- Read-only Linux AT-SPI2 application discovery and bounded accessibility-tree snapshots through MCP, with per-call confirmation.
 - Local activity history shared by desktop and MCP actions, without storing file contents or command arguments.
 - Interactive local PTY terminal using the desktop user's configured shell; the selected approved folder is only the initial working directory, not a sandbox.
 - Unit tests for approval persistence, filesystem authorization, bounded reads, and process metadata filtering.
@@ -30,12 +31,12 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - MCP client compatibility testing across individual AI applications; the automated local STDIO integration test passes, but each client still needs its own configuration test.
 - Terminal lifecycle tests in the running desktop app (shell exit, resize, output floods, and additional child-process cases).
 - Process-exit race and stale-PID checks.
-- Desktop automation and authenticated ChatGPT connectivity. ChatGPT Free currently cannot add custom MCP servers.
+- Keyboard/mouse input automation, screenshot capture, and authenticated ChatGPT connectivity. ChatGPT Free currently cannot add custom MCP servers.
 
 ## Product goals
 
 - Provide a native-feeling desktop interface.
-- Offer filesystem, process, and terminal tools through a local MCP server.
+- Offer filesystem, process, terminal, and read-only accessibility-inspection tools through a local MCP server.
 - Require explicit permission boundaries and approval for sensitive actions.
 - Support compatible AI clients through standard MCP transports where their capabilities allow.
 - Remain independent of Desktop Commander's hosted service and usage points.
@@ -79,7 +80,7 @@ Small, reviewable changes; a separate commit for each meaningful change; tests f
 4. Permissioned filesystem tools and desktop file manager — complete
 5. Opt-in MCP command execution and interactive terminal sessions — implemented; lifecycle testing remains
 6. Current-user process management and activity history — implemented
-7. Desktop automation, after evaluating Linux display-session constraints — evaluation documented; implementation remains outstanding
+7. Read-only Linux AT-SPI accessibility inspection implemented; keyboard/mouse control and screenshot capture remain outstanding
 8. Client compatibility tests
 9. Linux packaging and installation guide
 10. Optional authenticated remote connectivity

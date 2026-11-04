@@ -12,6 +12,8 @@ use std::{
 #[cfg(feature = "desktop")]
 use tauri::{Emitter, Manager, State};
 
+#[cfg(feature = "mcp")]
+mod accessibility;
 #[cfg(any(feature = "desktop", feature = "mcp"))]
 mod audit;
 #[cfg(feature = "mcp")]

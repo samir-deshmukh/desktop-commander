@@ -394,6 +394,24 @@ struct UsageStats {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AccessibilityConfirmInput {
+    /// Must be true to inspect application metadata on the desktop accessibility bus.
+    confirm: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AccessibilityTreeInput {
+    /// Exact application name returned by list_accessible_apps.
+    app_name: String,
+    /// Maximum tree depth (1-8, default 8).
+    max_depth: Option<usize>,
+    /// Maximum number of accessible elements (1-200, default 200).
+    max_nodes: Option<usize>,
+    /// Must be true to read accessible names and roles from the selected application.
+    confirm: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct TerminateProcessInput {
     /// PID of a process owned by the current Linux user.
     pid: u32,
@@ -951,6 +969,55 @@ impl DesktopCommanderMcp {
                 serde_json::to_string_pretty(&stats)
                     .unwrap_or_else(|error| format!("ERROR: cannot serialize usage stats: {error}"))
             }
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "List application names and basic window-level metadata exposed by the Linux AT-SPI accessibility bus. Read-only; does not capture screenshots, inspect clipboard contents, or send input. Requires confirm=true. Linux accessibility must already be enabled in desktop settings; this tool never changes that setting."
+    )]
+    async fn list_accessible_apps(
+        &self,
+        Parameters(args): Parameters<AccessibilityConfirmInput>,
+    ) -> String {
+        if !args.confirm {
+            return "ERROR: set confirm=true to inspect desktop application metadata".into();
+        }
+        let result = super::accessibility::list_accessible_apps().await;
+        self.record_audit("list_accessible_apps", None, result.is_ok());
+        match result {
+            Ok(apps) => serde_json::to_string_pretty(&apps).unwrap_or_else(|error| {
+                format!("ERROR: cannot serialize accessible applications: {error}")
+            }),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Read a bounded, read-only accessibility-tree snapshot for one exact application name from list_accessible_apps. Returns element names, roles, depths, and child counts; these may contain visible application text. Requires confirm=true. Maximum 200 nodes and depth 8. Does not click, type, capture screenshots, or change system settings."
+    )]
+    async fn read_accessibility_tree(
+        &self,
+        Parameters(args): Parameters<AccessibilityTreeInput>,
+    ) -> String {
+        if !args.confirm {
+            return "ERROR: set confirm=true to read this application's accessibility tree".into();
+        }
+        let result = super::accessibility::read_accessibility_tree(
+            &args.app_name,
+            args.max_depth,
+            args.max_nodes,
+        )
+        .await;
+        self.record_audit(
+            "read_accessibility_tree",
+            Some(&args.app_name),
+            result.is_ok(),
+        );
+        match result {
+            Ok(tree) => serde_json::to_string_pretty(&tree).unwrap_or_else(|error| {
+                format!("ERROR: cannot serialize accessibility tree: {error}")
+            }),
             Err(error) => format!("ERROR: {error}"),
         }
     }

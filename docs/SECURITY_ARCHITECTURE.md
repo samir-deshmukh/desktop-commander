@@ -39,6 +39,9 @@ Current terminal controls include bounded input chunks, clamped terminal dimensi
 
 Optional isolation (for example, a dedicated sandbox profile) is defense in depth, not a substitute for user consent or OS permissions. Do not promise containment until the selected sandbox is tested on supported Mint configurations.
 
+## Desktop accessibility inspection
+The MCP server has two read-only Linux AT-SPI2 tools: application discovery and a bounded accessibility-tree snapshot for one exact application name. Each call requires `confirm=true`; tree output is limited to 200 nodes, depth 8, and 160 characters per accessible name. Names may contain visible application text, so a snapshot is treated as user-authorized disclosure to the connected MCP client. The adapter only reads Accessible metadata and child references. It does not invoke Action or Component input methods, synthesize keyboard/pointer events, capture screenshots, inspect clipboard contents, or alter desktop settings. It fails closed when the session accessibility status is disabled and never enables it automatically. This is read-only inspection, not desktop control.
+
 ## MCP and networking
 - STDIO is the default local transport; it does not require a listening TCP port.
 - Do not expose a public HTTP listener or use a generic public tunnel.
@@ -58,3 +61,4 @@ Record action type, timestamp, policy decision, and bounded metadata. Avoid stor
 - Malformed MCP requests and repeated requests.
 - Terminal input is intentionally interpreted by the user's shell; verify and document that the PTY is powerful local shell access, not an argument-safe command API.
 - Confirm no remote listener starts in default mode.
+- Accessibility inspection requires per-call confirmation, respects disabled AT-SPI status, and never changes the user's desktop accessibility setting.

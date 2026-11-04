@@ -4,8 +4,8 @@
 - Local server binary: sam-desktop-mcp.
 - Transport: STDIO.
 - SDK: official Rust rmcp, pinned in the Cargo manifest.
-- Tools currently exposed: list_approved_folders, list_directory, and read_text_file.
-- A repeatable subprocess-based STDIO integration test covers initialization, tool discovery, default-deny behavior, approval reload, allowed reads, outside-root denial, revocation, and clean shutdown. Each target AI client still needs an independent compatibility check.
+- Tools include permissioned filesystem operations, terminal/process management, and two read-only Linux accessibility inspection tools: `list_accessible_apps` and `read_accessibility_tree`.
+- A repeatable subprocess-based STDIO integration test covers initialization, tool discovery, explicit confirmation for accessibility inspection, default-deny behavior, approval reload, allowed reads, outside-root denial, revocation, and clean shutdown. Each target AI client still needs an independent compatibility check.
 
 ## Repeatable local protocol test
 
@@ -24,6 +24,15 @@ This validates the server protocol and its permission behavior, not a hosted Cha
 
 ## Adapter rule
 MCP handlers validate protocol inputs, then call shared core services. They must not implement their own filesystem authorization. UI and MCP requests use the same policy layer.
+
+## Linux accessibility inspection
+- `list_accessible_apps` returns bounded application names, roles, and top-level child counts from the AT-SPI2 registry.
+- `read_accessibility_tree` reads one exact application name returned by the list tool and returns a flat, depth-labelled snapshot of accessible element names, roles, and child counts.
+- Both tools require `confirm=true` on every call. Tree snapshots are capped at 200 nodes and depth 8; names are capped at 160 Unicode characters.
+- These are read-only tools. They do not invoke AT-SPI Action/Component input interfaces, send keyboard or pointer input, capture screenshots, inspect the clipboard, or change desktop settings.
+- Linux toolkit accessibility must already be enabled in the user's desktop session. The tools fail closed when the AT-SPI status is disabled; they never enable it automatically.
+- Accessible names can include text visible in an application, so users should only request a snapshot when they intend to share that application's visible information with the connected MCP client.
+- This is a first read-only adapter, not full desktop automation. Mouse/keyboard control and screenshot capture remain unimplemented.
 
 ## STDIO lifecycle
 The MCP client launches the executable and communicates over stdin/stdout. Protocol messages go to stdout; diagnostic logs must go to stderr. Do not assume the desktop window remains open. Permission changes must be read from authoritative persisted state on each request or delivered through a reliable shared state mechanism.

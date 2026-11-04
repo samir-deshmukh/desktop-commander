@@ -75,6 +75,8 @@ Each AI application has its own configuration file and may use a different confi
 | read_terminal | Read bounded output from an active terminal session |
 | close_terminal | Close a terminal session and terminate its shell |
 | list_terminal_sessions | List active MCP terminal session IDs |
+| list_accessible_apps | List Linux applications exposed by the AT-SPI accessibility registry (requires confirm=true) |
+| read_accessibility_tree | Read a bounded, read-only accessibility snapshot for one named application (requires confirm=true) |
 | list_processes | Inspect metadata for current-user Linux processes |
 | terminate_process | Send SIGTERM to a current-user process after explicit confirmation |
 | get_config | Read current folder permissions, command-access state, and server limits |
@@ -94,6 +96,7 @@ Each AI application has its own configuration file and may use a different confi
 - Delete only handles regular files; directory deletion and recursive deletion are not exposed.
 - Move and copy refuse to overwrite an existing destination. Copy is capped at 50 MiB; append keeps the combined UTF-8 file within 1 MiB.
 - MCP command execution is disabled by default and must be enabled in the desktop app. Each call also requires confirm=true.
+- Accessibility inspection is read-only and requires confirm=true on each call. Linux toolkit accessibility must already be enabled; the MCP tools never change system settings. Snapshots are capped at 200 nodes/depth 8 and may contain visible application text.
 - Commands are launched directly without shell interpretation, with a 30-second timeout and 256 KiB caps for stdout and stderr.
 - A default blocklist rejects privilege escalation/user administration, disk and partition management, shutdown/reboot, firewall changes, and direct process-termination commands. It also checks common `env`/`busybox` wrappers and protected `systemctl`/`loginctl` actions. Development tools such as `git`, `npm`, `node`, `python`, `cargo`, `curl`, and `wget` remain available.
 - This blocklist is a guardrail, not a security boundary. Allowed tools may execute scripts, spawn child processes, or perform other operations with the desktop user's normal OS permissions; an approved working directory is not a sandbox.

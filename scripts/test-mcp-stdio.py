@@ -129,9 +129,21 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "start_search", "get_more_search_results", "list_searches", "stop_search", "write_text_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process", "get_config", "get_recent_tool_calls", "get_usage_stats"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "start_search", "get_more_search_results", "list_searches", "stop_search", "write_text_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_accessible_apps", "read_accessibility_tree", "list_processes", "terminate_process", "get_config", "get_recent_tool_calls", "get_usage_stats"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
+
+            unconfirmed_apps = response_text(client.request(
+                "tools/call", {"name": "list_accessible_apps", "arguments": {"confirm": False}}
+            ))
+            assert "confirm=true" in unconfirmed_apps
+            unconfirmed_tree = response_text(client.request(
+                "tools/call", {"name": "read_accessibility_tree", "arguments": {
+                    "app_name": "app", "confirm": False
+                }}
+            ))
+            assert "confirm=true" in unconfirmed_tree
+            passed.append("accessibility inspection requires explicit confirmation")
 
             roots = json.loads(response_text(client.request(
                 "tools/call", {"name": "list_approved_folders", "arguments": {}}

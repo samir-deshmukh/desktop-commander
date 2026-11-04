@@ -25,7 +25,7 @@ required-features = ["mcp"]
 [features]
 default = ["desktop"]
 desktop = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-log"]
-mcp = ["dep:rmcp", "dep:tokio"]
+mcp = ["dep:rmcp", "dep:tokio", "dep:atspi-connection", "dep:atspi-proxies", "dep:zbus"]
 
 [build-dependencies]
 tauri-build = { version = "2.7.4", features = [] }
@@ -40,3 +40,6 @@ tauri-plugin-dialog = { version = "2", optional = true }
 rmcp = { version = "=3.6.0", features = ["server", "transport-io"], optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
 portable-pty = "0.9.0"
+atspi-connection = { version = "=0.14.0", default-features = false, optional = true }
+atspi-proxies = { version = "=0.14.0", optional = true }
+zbus = { version = "5.5", default-features = false, features = ["async-io"], optional = true }

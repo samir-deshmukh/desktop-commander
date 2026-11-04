@@ -52,6 +52,7 @@ Status labels distinguish existing foundation from planned work.
 ## Phase 4 — Linux desktop automation
 - [x] Identify active X11/Wayland session and Cinnamon compatibility; record the verified X11/Cinnamon environment.
 - [x] Evaluate accessibility and desktop automation candidates; record AT-SPI, Enigo, and portal findings in `docs/DESKTOP_AUTOMATION_EVALUATION.md`.
+- [x] Implement read-only AT-SPI2 MCP discovery and bounded accessibility-tree snapshots with per-call confirmation; no input or capture controls.
 - [ ] Run automation in an isolated adapter where practical.
 - [ ] Make capture/control permissions explicit and visible.
 

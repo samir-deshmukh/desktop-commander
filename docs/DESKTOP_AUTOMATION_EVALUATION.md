@@ -1,6 +1,6 @@
 # Linux Desktop Automation Evaluation
 
-Status: platform reconnaissance complete; no automation dependency or input-control capability has been added.
+Status: read-only AT-SPI2 inspection is implemented for MCP; no keyboard, pointer, or screenshot capability has been added.
 
 Evaluation date: 2026-11-04
 
@@ -16,13 +16,17 @@ Verified on the development machine:
 - Native X11 libraries including X11 and Xtst are present.
 - The machine has approximately 3.2 GiB RAM. Automation must remain on-demand and avoid continuous screen polling or heavyweight vision pipelines.
 
-The AT-SPI check proves that the accessibility bus is reachable. A live test of the Tauri app found its window, but the WebKit subtree ended at an empty `section` node with no exposed controls. Cinnamon/GNOME `toolkit-accessibility` is currently `false`, and the AT-SPI bus reports `org.a11y.Status.IsEnabled=false`, although `GTK_MODULES=gail:atk-bridge` is present. These disabled accessibility states may explain the empty tree, but the cause has not been isolated. No global accessibility setting was changed.
+A controlled test temporarily enabled toolkit accessibility and started the app through the actual Tauri/Vite development workflow. After allowing WebKitGTK time to populate its tree, AT-SPI exposed 72 nodes, including 24 named nodes and the app navigation buttons, headings, articles, and landmarks. The first probe checked too early; the tree is populated asynchronously.
+
+The test restored both GNOME and Cinnamon `toolkit-accessibility` settings to their original `false` values, and the AT-SPI bus returned to `IsEnabled=false`. The adapter never changes these settings. The user must enable accessibility in the desktop session before requesting inspection.
+
+The live MCP smoke test discovered 31 accessible applications and returned a 34-node snapshot for Sam's Desktop Commander, including its main navigation, headings, and key buttons. The snapshot correctly reported `truncated=true` at the configured depth bound, with no traversal warnings. The desktop settings were restored again after this end-to-end test.
 
 ## Candidate evaluation
 
 | Capability | Candidate | Findings | Decision |
 |---|---|---|---|
-| Semantic UI discovery and accessible actions | Rust `atspi` crate | Pure-Rust AT-SPI2 client using zbus; dual MIT/Apache-2.0. The system AT-SPI bus is active and at least two desktop applications are visible. | Preferred candidate for inspecting controls and invoking supported accessible actions. Test against this app's WebKit view before adoption. |
+| Semantic UI discovery (read-only) | Rust `atspi-connection` and `atspi-proxies` crates | Pure-Rust AT-SPI2 client using zbus; pinned at 0.14.0. Controlled test confirmed the Tauri/WebKit accessibility tree is readable when toolkit accessibility is enabled. | Implemented for application discovery and bounded tree snapshots. No Action interface calls are made. |
 | Keyboard and pointer input on X11 | `enigo` 0.6.1 with default `x11rb` feature | MIT licensed; default Linux backend uses native Rust/X11 rather than requiring the `xdotool` executable. | Preferred candidate for a narrowly scoped X11 input adapter, subject to a controlled proof-of-concept and dependency/build review. |
 | Screenshot capture | XDG Screenshot portal | The portal service exposes Screenshot on this machine. The user-confirmation flow and returned image handling have not been tested. | Candidate for explicit, one-shot capture. Do not add continuous capture based on this finding. |
 | Wayland capture and remote input | XDG ScreenCast and RemoteDesktop portals | Neither interface is exposed by the currently installed portal backend. Enigo's Wayland/libei paths are documented as experimental. | Not supported on this machine's current desktop stack. Defer Wayland automation until a supported, consent-based backend is available and tested. |
@@ -36,10 +40,19 @@ References:
 - [XDG RemoteDesktop portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html) — consent-based device selection and session lifecycle.
 - [XDG ScreenCast portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html) — screen/window capture sessions.
 
+## Implemented read-only adapter
+
+- MCP tools: `list_accessible_apps` and `read_accessibility_tree`.
+- Both require `confirm=true` on every call.
+- Tree output is bounded to 200 nodes, depth 8, and 160 Unicode characters per accessible name.
+- Accessible names can contain visible application text; users should only request a snapshot when they intend to share that information with the MCP client.
+- The adapter does not enable AT-SPI, click, type, move the pointer, capture screenshots, or read the clipboard.
+- If AT-SPI is disabled, the tools return an actionable error and do not change system settings.
+
 ## Recommended design
 
 1. Keep automation behind a dedicated Rust adapter and shared policy boundary. MCP and desktop UI must call the same authorization code.
-2. Prefer AT-SPI element discovery and supported semantic actions over coordinates. Use Enigo only when an accessible action is unavailable.
+2. The current adapter uses AT-SPI only for read-only discovery. For future control, prefer supported semantic actions over coordinates; use Enigo only when an accessible action is unavailable and explicit input permissions are in place.
 3. Do not expose raw desktop input as an unrestricted shell-like tool. Validate action types, text lengths, coordinate bounds, key names, and action counts.
 4. Keep automation disabled by default. Require the user to start a visible session, show a persistent active indicator, and provide an immediate Stop control.
 5. Show the target application and requested action before execution. Require explicit confirmation for consequential actions; do not infer consent from MCP client identity.
@@ -50,9 +63,9 @@ References:
 
 ## Remaining work
 
-- [ ] Re-test the Tauri/WebKit view with AT-SPI explicitly enabled for a controlled test session; verify whether useful nodes and actions appear without permanently changing the desktop accessibility settings.
-- [ ] Build a non-invasive proof-of-concept that lists accessible application/window metadata without sending input.
-- [ ] Review exact crate versions, transitive dependencies, build impact, and licenses before adding dependencies.
+- [x] Re-test the Tauri/WebKit view with AT-SPI temporarily enabled; confirm the accessible tree populates asynchronously and restore the original desktop settings.
+- [x] Build the read-only AT-SPI2 MCP adapter for application discovery and bounded accessibility-tree snapshots.
+- [x] Pin the AT-SPI client crates at 0.14.0 and review their Rust API and build impact; continue monitoring transitive dependency updates.
 - [ ] Prototype X11 input against a disposable test window, with explicit user-started activation and a Stop control.
 - [ ] Test one-shot Screenshot portal consent and image handling separately.
 - [ ] Decide whether a separate helper process is justified after measuring the adapter's privilege and lifecycle boundaries.
