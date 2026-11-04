@@ -86,6 +86,7 @@ Each AI application has its own configuration file and may use a different confi
 | terminate_process | Send SIGTERM to a current-user process after explicit confirmation |
 | kill_process | Original Desktop Commander-compatible name for the same confirmed SIGTERM operation |
 | get_config | Read current folder permissions, command-access state, and server limits |
+| set_config_value | Update approved directories, writable directories, or command execution; requires `confirm=true` and rejects an empty allowed-directory list |
 | get_recent_tool_calls | Read recent MCP activity metadata |
 | get_usage_stats | Aggregate recent MCP tool usage counts |
 

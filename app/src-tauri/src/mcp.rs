@@ -372,6 +372,16 @@ struct RecentToolCallsInput {
     limit: Option<usize>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SetConfigValueInput {
+    /// Configuration key. Supported keys: allowedDirectories, writableDirectories, commandExecutionEnabled.
+    key: String,
+    /// JSON value matching the selected key (directory arrays or a boolean).
+    value: serde_json::Value,
+    /// Must be true to confirm changing local permissions or command access.
+    confirm: bool,
+}
+
 #[derive(Serialize)]
 struct McpServerConfig {
     approved_folders: Vec<String>,
@@ -923,6 +933,21 @@ impl DesktopCommanderMcp {
         match result {
             Ok(config) => serde_json::to_string_pretty(&config)
                 .unwrap_or_else(|error| format!("ERROR: cannot serialize MCP config: {error}")),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Set a supported local Desktop Commander configuration value. Changing approved folders, write permissions, or command execution requires confirm=true. Empty allowedDirectories is rejected rather than granting unrestricted access."
+    )]
+    fn set_config_value(&self, Parameters(args): Parameters<SetConfigValueInput>) -> String {
+        if !args.confirm {
+            return "ERROR: set confirm=true to change configuration".into();
+        }
+        let result = self.set_config_value_inner(&args.key, &args.value);
+        self.record_audit("set_config_value", Some(&args.key), result.is_ok());
+        match result {
+            Ok(()) => format!("Configuration value '{}' updated", args.key),
             Err(error) => format!("ERROR: {error}"),
         }
     }
@@ -1545,6 +1570,120 @@ impl DesktopCommanderMcp {
             stdout_truncated,
             stderr_truncated,
         })
+    }
+
+    fn set_config_value_inner(&self, key: &str, value: &serde_json::Value) -> Result<(), String> {
+        self.policy.refresh()?;
+        match key {
+            "allowedDirectories" | "approved_folders" => {
+                let values = value
+                    .as_array()
+                    .ok_or("allowedDirectories must be an array of existing directory paths")?;
+                if values.is_empty() {
+                    return Err("An empty allowedDirectories list would grant unrestricted access; use the app's folder approval controls instead".into());
+                }
+                let mut updated = Vec::with_capacity(values.len());
+                for item in values {
+                    let path = item
+                        .as_str()
+                        .ok_or("Every allowedDirectories entry must be a string")?;
+                    let canonical = super::canonical_directory(path)?;
+                    if !updated.contains(&canonical) {
+                        updated.push(canonical);
+                    }
+                }
+                updated.sort();
+                let writable = self
+                    .policy
+                    .writable_roots
+                    .lock()
+                    .map_err(|_| "Permission state unavailable")?
+                    .clone();
+                let writable: Vec<PathBuf> = writable
+                    .into_iter()
+                    .filter(|root| updated.contains(root))
+                    .collect();
+                let command_enabled = *self
+                    .policy
+                    .command_execution_enabled
+                    .lock()
+                    .map_err(|_| "Permission state unavailable")?;
+                self.policy.persist_with(&updated, &writable, command_enabled)?;
+                *self
+                    .policy
+                    .approved_roots
+                    .lock()
+                    .map_err(|_| "Permission state unavailable")? = updated;
+                *self
+                    .policy
+                    .writable_roots
+                    .lock()
+                    .map_err(|_| "Permission state unavailable")? = writable;
+                Ok(())
+            }
+            "writableDirectories" | "writable_folders" => {
+                let values = value
+                    .as_array()
+                    .ok_or("writableDirectories must be an array of approved directory paths")?;
+                let approved = self
+                    .policy
+                    .approved_roots
+                    .lock()
+                    .map_err(|_| "Permission state unavailable")?
+                    .clone();
+                let mut updated = Vec::with_capacity(values.len());
+                for item in values {
+                    let path = item
+                        .as_str()
+                        .ok_or("Every writableDirectories entry must be a string")?;
+                    let canonical = super::canonical_directory(path)?;
+                    if !approved.contains(&canonical) {
+                        return Err(format!("Write access can only be enabled for already approved folders: {}", canonical.display()));
+                    }
+                    if !updated.contains(&canonical) {
+                        updated.push(canonical);
+                    }
+                }
+                updated.sort();
+                let command_enabled = *self
+                    .policy
+                    .command_execution_enabled
+                    .lock()
+                    .map_err(|_| "Permission state unavailable")?;
+                self.policy.persist_with(&approved, &updated, command_enabled)?;
+                *self
+                    .policy
+                    .writable_roots
+                    .lock()
+                    .map_err(|_| "Permission state unavailable")? = updated;
+                Ok(())
+            }
+            "commandExecutionEnabled" | "command_execution_enabled" => {
+                let enabled = value
+                    .as_bool()
+                    .ok_or("commandExecutionEnabled must be a boolean")?;
+                let approved = self
+                    .policy
+                    .approved_roots
+                    .lock()
+                    .map_err(|_| "Permission state unavailable")?
+                    .clone();
+                let writable = self
+                    .policy
+                    .writable_roots
+                    .lock()
+                    .map_err(|_| "Permission state unavailable")?
+                    .clone();
+                self.policy.persist_with(&approved, &writable, enabled)?;
+                *self
+                    .policy
+                    .command_execution_enabled
+                    .lock()
+                    .map_err(|_| "Permission state unavailable")? = enabled;
+                Ok(())
+            }
+            _ => Err("Unsupported configuration key. Supported keys: allowedDirectories, writableDirectories, commandExecutionEnabled".into()),
+        }
     }
 
     fn write_text_file_inner(&self, args: &WriteFileInput) -> Result<(), String> {

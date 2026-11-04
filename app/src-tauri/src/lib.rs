@@ -255,7 +255,7 @@ impl AccessPolicy {
         self.persist_with(roots, &writable, command_enabled)
     }
 
-    #[cfg(feature = "desktop")]
+    #[cfg(any(feature = "desktop", feature = "mcp"))]
     fn persist_with(
         &self,
         roots: &[PathBuf],

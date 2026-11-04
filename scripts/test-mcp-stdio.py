@@ -129,7 +129,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "start_search", "get_more_search_results", "list_searches", "stop_search", "write_text_file", "write_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "interact_with_process", "read_terminal", "read_process_output", "close_terminal", "force_terminate", "list_terminal_sessions", "list_sessions", "list_accessible_apps", "read_accessibility_tree", "list_processes", "terminate_process", "kill_process", "get_config", "get_recent_tool_calls", "get_usage_stats"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "start_search", "get_more_search_results", "list_searches", "stop_search", "write_text_file", "write_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "interact_with_process", "read_terminal", "read_process_output", "close_terminal", "force_terminate", "list_terminal_sessions", "list_sessions", "list_accessible_apps", "read_accessibility_tree", "list_processes", "terminate_process", "kill_process", "get_config", "set_config_value", "get_recent_tool_calls", "get_usage_stats"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -157,6 +157,36 @@ def main() -> int:
             assert initial_config["approved_folders"] == []
             assert not initial_config["command_execution_enabled"]
             passed.append("permission-aware MCP configuration view")
+
+            unconfirmed_config = response_text(client.request(
+                "tools/call", {"name": "set_config_value", "arguments": {
+                    "key": "commandExecutionEnabled", "value": True, "confirm": False
+                }}
+            ))
+            assert "confirm=true" in unconfirmed_config
+            unsafe_empty_roots = response_text(client.request(
+                "tools/call", {"name": "set_config_value", "arguments": {
+                    "key": "allowedDirectories", "value": [], "confirm": True
+                }}
+            ))
+            assert "unrestricted access" in unsafe_empty_roots
+            set_command = response_text(client.request(
+                "tools/call", {"name": "set_config_value", "arguments": {
+                    "key": "commandExecutionEnabled", "value": True, "confirm": True
+                }}
+            ))
+            assert "updated" in set_command
+            config_after_set = json.loads(response_text(client.request(
+                "tools/call", {"name": "get_config", "arguments": {}}
+            )))
+            assert config_after_set["command_execution_enabled"]
+            set_command_off = response_text(client.request(
+                "tools/call", {"name": "set_config_value", "arguments": {
+                    "key": "commandExecutionEnabled", "value": False, "confirm": True
+                }}
+            ))
+            assert "updated" in set_command_off
+            passed.append("confirmed configuration updates and unrestricted-folder denial")
 
             disabled_command = response_text(client.request(
                 "tools/call", {"name": "run_command", "arguments": {
