@@ -65,6 +65,7 @@ Tauri, Rust, React, and TypeScript are in the current implementation. Their depe
 - [Local MCP client setup and protocol test](docs/local-mcp-clients.md)
 - [MCP protocol details and repeatable integration test](docs/MCP_PROTOCOL.md)
 - [ChatGPT remote integration requirements](docs/CHATGPT_INTEGRATION.md)
+- [Linux desktop automation evaluation](docs/DESKTOP_AUTOMATION_EVALUATION.md)
 
 ## Development approach
 
@@ -78,7 +79,7 @@ Small, reviewable changes; a separate commit for each meaningful change; tests f
 4. Permissioned filesystem tools and desktop file manager — complete
 5. Opt-in MCP command execution and interactive terminal sessions — implemented; lifecycle testing remains
 6. Current-user process management and activity history — implemented
-7. Desktop automation, after evaluating Linux display-session constraints
+7. Desktop automation, after evaluating Linux display-session constraints — evaluation documented; implementation remains outstanding
 8. Client compatibility tests
 9. Linux packaging and installation guide
 10. Optional authenticated remote connectivity

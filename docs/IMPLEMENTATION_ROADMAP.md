@@ -50,8 +50,8 @@ Status labels distinguish existing foundation from planned work.
 - [ ] Add further process lifecycle checks for stale PIDs and process-exit races.
 
 ## Phase 4 — Linux desktop automation
-- [ ] Identify active X11/Wayland session and Cinnamon compatibility.
-- [ ] Evaluate accessibility and desktop automation candidates.
+- [x] Identify active X11/Wayland session and Cinnamon compatibility; record the verified X11/Cinnamon environment.
+- [x] Evaluate accessibility and desktop automation candidates; record AT-SPI, Enigo, and portal findings in `docs/DESKTOP_AUTOMATION_EVALUATION.md`.
 - [ ] Run automation in an isolated adapter where practical.
 - [ ] Make capture/control permissions explicit and visible.
 
