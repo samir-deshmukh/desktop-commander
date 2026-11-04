@@ -27,6 +27,7 @@ Status labels distinguish existing foundation from planned work.
 - [x] Add desktop file editing, file/folder creation, rename, and confirmed deletion controls, shown only for writable roots.
 - [x] Add MCP line-range reads and exact-count block edits with atomic writes and ambiguous-match rejection.
 - [x] Add a bounded local JSONL audit log shared by desktop and MCP processes, plus a recent-activity view; exclude file contents and command arguments.
+- [x] Expose recent MCP tool calls and aggregate usage statistics from the audit log.
 - [ ] Add a recovery/backup workflow before expanding mutation capabilities.
 
 ## Phase 3 — Terminal and processes

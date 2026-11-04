@@ -71,6 +71,8 @@ Each AI application has its own configuration file and may use a different confi
 | list_terminal_sessions | List active MCP terminal session IDs |
 | list_processes | Inspect metadata for current-user Linux processes |
 | terminate_process | Send SIGTERM to a current-user process after explicit confirmation |
+| get_recent_tool_calls | Read recent MCP activity metadata |
+| get_usage_stats | Aggregate recent MCP tool usage counts |
 
 ## Permission boundaries
 

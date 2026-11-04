@@ -7,7 +7,7 @@ use std::{
 };
 
 const MAX_AUDIT_BYTES: u64 = 1024 * 1024;
-#[cfg(any(feature = "desktop", test))]
+#[cfg(any(feature = "desktop", feature = "mcp", test))]
 const MAX_AUDIT_EVENTS: usize = 1_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,7 +69,7 @@ pub(crate) fn append_event(
     Ok(())
 }
 
-#[cfg(any(feature = "desktop", test))]
+#[cfg(any(feature = "desktop", feature = "mcp", test))]
 pub(crate) fn read_recent(path: &Path, limit: usize) -> Result<Vec<AuditEvent>, String> {
     use std::io::{BufRead, BufReader};
     if !path.exists() {

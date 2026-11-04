@@ -129,7 +129,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process", "get_recent_tool_calls", "get_usage_stats"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -302,6 +302,17 @@ def main() -> int:
             )))
             assert any(item["pid"] == client.process.pid for item in process_snapshot["processes"])
             passed.append("current-user process listing")
+
+            recent_calls = json.loads(response_text(client.request(
+                "tools/call", {"name": "get_recent_tool_calls", "arguments": {"limit": 10}}
+            )))
+            assert recent_calls and all(event["source"] == "MCP" for event in recent_calls)
+            usage = json.loads(response_text(client.request(
+                "tools/call", {"name": "get_usage_stats", "arguments": {}}
+            )))
+            assert usage["total_recorded_calls"] >= len(recent_calls)
+            assert "read_text_file" in usage["calls_by_tool"]
+            passed.append("recent MCP tool calls and usage statistics")
 
             child_process = subprocess.Popen(["sleep", "30"])
             try:

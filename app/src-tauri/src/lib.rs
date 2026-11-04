@@ -475,6 +475,8 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
             "list_terminal_sessions",
             "list_processes",
             "terminate_process",
+            "get_recent_tool_calls",
+            "get_usage_stats",
         ],
     })
 }

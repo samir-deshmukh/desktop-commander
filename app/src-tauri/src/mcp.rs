@@ -134,6 +134,20 @@ struct CommandOutput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct RecentToolCallsInput {
+    /// Maximum recent MCP events to return (1-100, default 25).
+    limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct UsageStats {
+    total_recorded_calls: usize,
+    successful_calls: usize,
+    failed_calls: usize,
+    calls_by_tool: std::collections::BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct TerminateProcessInput {
     /// PID of a process owned by the current Linux user.
     pid: u32,
@@ -499,6 +513,52 @@ impl DesktopCommanderMcp {
                     format!("ERROR: cannot serialize terminal sessions: {error}")
                 }),
             Err(_) => "ERROR: terminal session state unavailable".into(),
+        }
+    }
+
+    #[tool(
+        description = "Return recent MCP tool activity metadata from the local audit log. File contents and command arguments are not recorded."
+    )]
+    fn get_recent_tool_calls(&self, Parameters(args): Parameters<RecentToolCallsInput>) -> String {
+        match super::audit::read_recent(&self.audit_file, args.limit.unwrap_or(25).clamp(1, 100)) {
+            Ok(events) => {
+                let mcp_events: Vec<_> = events
+                    .into_iter()
+                    .filter(|event| event.source == "MCP")
+                    .collect();
+                serde_json::to_string_pretty(&mcp_events).unwrap_or_else(|error| {
+                    format!("ERROR: cannot serialize recent tool calls: {error}")
+                })
+            }
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Return aggregate MCP tool usage counts from the latest 1,000 local audit events. Does not include file contents or command arguments."
+    )]
+    fn get_usage_stats(&self) -> String {
+        match super::audit::read_recent(&self.audit_file, 1_000) {
+            Ok(events) => {
+                let mut stats = UsageStats {
+                    total_recorded_calls: 0,
+                    successful_calls: 0,
+                    failed_calls: 0,
+                    calls_by_tool: std::collections::BTreeMap::new(),
+                };
+                for event in events.into_iter().filter(|event| event.source == "MCP") {
+                    stats.total_recorded_calls += 1;
+                    if event.outcome == "success" {
+                        stats.successful_calls += 1;
+                    } else {
+                        stats.failed_calls += 1;
+                    }
+                    *stats.calls_by_tool.entry(event.action).or_default() += 1;
+                }
+                serde_json::to_string_pretty(&stats)
+                    .unwrap_or_else(|error| format!("ERROR: cannot serialize usage stats: {error}"))
+            }
+            Err(error) => format!("ERROR: {error}"),
         }
     }
 
