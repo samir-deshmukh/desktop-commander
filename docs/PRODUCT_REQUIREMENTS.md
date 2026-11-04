@@ -16,7 +16,7 @@ Provide a user-controlled Linux desktop application that exposes selected comput
 2. Let the user explicitly approve and revoke filesystem roots.
 3. Provide directory listing and bounded text reading within approved roots.
 4. Add file mutation only after write/delete permissions, confirmation, and audit behavior are implemented.
-5. Provide terminal sessions through a PTY rather than presenting one-shot commands as an interactive terminal.
+5. Provide a real local PTY terminal. Clearly disclose that it runs with desktop-user permissions and the approved starting folder is not a sandbox; harden session lifecycle and output handling before claiming production readiness.
 6. Add process inspection and termination with explicit action policy.
 7. Add desktop input automation only after validating the active display backend and consent model.
 8. Expose capabilities through one shared Rust core, used by both UI and MCP adapters.
@@ -35,5 +35,5 @@ Provide a user-controlled Linux desktop application that exposes selected comput
 - Desktop app builds on the documented Linux Mint setup.
 - MCP server initializes over STDIO and lists/calls its tools.
 - Unapproved paths are denied; approved read operations work; revoked paths are denied on the next request.
-- No file-write, delete, arbitrary-shell, or remote-network capability is accidentally exposed.
+- File-write and delete capabilities are not exposed. The desktop UI intentionally exposes a local interactive shell; it is not sandboxed. No remote-network capability is exposed.
 - Build/test commands and known limitations are documented.

@@ -22,10 +22,13 @@ Status labels distinguish existing foundation from planned work.
 - [ ] Add audit events and tests before exposing mutation tools.
 
 ## Phase 3 — Terminal and processes
-- [ ] Evaluate PTY implementations (including portable-pty) and terminal renderer (xterm.js).
-- [ ] Implement interactive sessions, bounded output, resize, cancellation, and cleanup.
-- [ ] Define sensitive-action approval and non-root execution policy.
-- [ ] Add process inspection and carefully scoped termination.
+- [x] Integrate a PTY backend (`portable-pty`) and terminal renderer (`xterm.js`).
+- [x] Implement interactive shell sessions, input-size checks, terminal resize bounds, output events, and explicit close.
+- [x] Document that the shell runs as the desktop user and the selected approved directory is not a sandbox.
+- [ ] Add session-count limits, output/backpressure handling, and reliable cleanup on shell exit and app shutdown.
+- [ ] Test close behavior, shell exit, resize, output floods, and child-process behavior in the running desktop app.
+- [ ] Add process inspection and carefully scoped termination with explicit confirmation.
+- [ ] Revisit whether any sensitive action approval can be enforced meaningfully; do not rely on command-string blacklists.
 
 ## Phase 4 — Linux desktop automation
 - [ ] Identify active X11/Wayland session and Cinnamon compatibility.

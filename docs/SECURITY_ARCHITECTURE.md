@@ -27,7 +27,9 @@ Status: baseline design; review whenever a new capability or transport is introd
 ## Terminal policy
 A command-string blacklist is not a reliable security boundary: shells, interpreters, aliases, scripts, and child processes can change command meaning. Do not claim otherwise.
 
-The initial implementation maps a small reviewed set of diagnostic commands to executable-and-argument arrays and does not invoke a shell. A future full terminal must be a real PTY with user-account permissions, explicit capability policy, approvals, process limits, output limits, cancellation, and audit events. Sensitive actions may require user approval. Do not silently run as root.
+The desktop UI currently exposes an interactive local PTY using the user's configured shell (falling back to `/bin/bash`). It runs as the desktop account and starts in an approved directory, but that directory is only the initial working directory—not a sandbox or restriction on shell access. Shell commands can access anything permitted to the desktop account. There is no command allowlist and no silent root elevation.
+
+Current terminal controls include bounded input chunks, clamped terminal dimensions, session IDs, and explicit close. These controls do not sandbox commands or guarantee that child processes spawned by a shell are contained. Session lifecycle limits, output/backpressure controls, robust app-shutdown cleanup, and process inspection/termination remain follow-up work. Do not describe the terminal as isolated or production-hardened. Users must not run untrusted commands.
 
 Optional isolation (for example, a dedicated sandbox profile) is defense in depth, not a substitute for user consent or OS permissions. Do not promise containment until the selected sandbox is tested on supported Mint configurations.
 
@@ -47,5 +49,5 @@ Record action type, timestamp, policy decision, and bounded metadata. Avoid stor
 - Oversized files and output floods.
 - Concurrent rename/replacement between validation and operation.
 - Malformed MCP requests and repeated requests.
-- Terminal arguments containing shell metacharacters (they remain data when no shell is invoked).
+- Terminal input is intentionally interpreted by the user's shell; verify and document that the PTY is powerful local shell access, not an argument-safe command API.
 - Confirm no remote listener starts in default mode.
