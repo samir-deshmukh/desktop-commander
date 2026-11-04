@@ -129,7 +129,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process", "get_recent_tool_calls", "get_usage_stats"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "start_search", "get_more_search_results", "list_searches", "stop_search", "write_text_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process", "get_recent_tool_calls", "get_usage_stats"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -216,6 +216,32 @@ def main() -> int:
             )))
             assert any(path.endswith("hello.txt") for path in search)
             passed.append("bounded recursive filename search")
+
+            for index in range(60):
+                (approved / f"page-match-{index:03}.txt").write_text("paged search fixture", encoding="utf-8")
+            first_page = json.loads(response_text(client.request(
+                "tools/call", {"name": "start_search", "arguments": {
+                    "path": canonical, "query": "page-match-", "max_results": 100
+                }}
+            )))
+            assert len(first_page["results"]) == 50 and first_page["has_more"]
+            active_searches = json.loads(response_text(client.request(
+                "tools/call", {"name": "list_searches", "arguments": {}}
+            )))
+            assert any(item["search_id"] == first_page["search_id"] for item in active_searches)
+            second_page = json.loads(response_text(client.request(
+                "tools/call", {"name": "get_more_search_results", "arguments": {
+                    "search_id": first_page["search_id"]
+                }}
+            )))
+            assert len(second_page["results"]) == 10 and not second_page["has_more"]
+            stopped = response_text(client.request(
+                "tools/call", {"name": "stop_search", "arguments": {
+                    "search_id": first_page["search_id"]
+                }}
+            ))
+            assert "stopped" in stopped.lower()
+            passed.append("paginated search sessions with list and stop")
 
             multiple = json.loads(response_text(client.request(
                 "tools/call", {"name": "read_multiple_files", "arguments": {"paths": [str(sample)]}}

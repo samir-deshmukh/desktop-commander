@@ -13,7 +13,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 - Tauri 2 + React + TypeScript desktop shell.
 - Persistent, explicitly approved folder roots.
-- Approved-folder browsing, bounded UTF-8 reads, line-range reads, exact-count block editing, recursive filename/content search, file metadata, and multi-file reads.
+- Approved-folder browsing, bounded UTF-8 reads, line-range reads (including tail-style offsets), exact-count block editing, paginated recursive filename/content search, file metadata, and multi-file reads.
 - Separate per-folder write approval with an in-app text editor, new file/folder creation, append, copy, rename, and confirmed file deletion; the same guarded operations are exposed through MCP.
 - Opt-in one-shot MCP command execution with per-call confirmation, a 30-second timeout, bounded output, and no shell interpretation.
 - Interactive MCP terminal sessions with explicit start/close, bounded input/output, and a three-session limit.

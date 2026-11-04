@@ -53,9 +53,13 @@ Each AI application has its own configuration file and may use a different confi
 | list_approved_folders | Return the saved approved folder roots |
 | list_directory | List one directory inside an approved root |
 | read_text_file | Read a UTF-8 text file up to 1 MiB inside an approved root |
-| read_file | Read a UTF-8 file by zero-based line range |
+| read_file | Read a UTF-8 file by zero-based or negative line offset (tail-style) |
 | edit_block | Replace exact text with an expected match count and atomic write |
 | search_files | Search file and directory names recursively with depth and result caps |
+| start_search | Start a bounded paginated filename or content search |
+| get_more_search_results | Read the next page of search matches |
+| list_searches | List active paginated search sessions |
+| stop_search | Stop a search and release retained results |
 | get_file_info | Read basic metadata for an approved file or directory |
 | read_multiple_files | Read up to 10 approved UTF-8 files with a combined 4 MiB cap |
 | search_content | Search bounded UTF-8 file contents recursively inside an approved folder |
@@ -81,7 +85,7 @@ Each AI application has its own configuration file and may use a different confi
 - No folders are approved by default.
 - Paths outside approved roots are denied.
 - Direct symbolic-link paths are rejected; symbolic links found during directory listing are skipped.
-- Text reads are limited to 1 MiB.
+- Text reads are limited to 1 MiB. Search sessions retain at most 1,000 matches, return 50 per page, and allow at most five active sessions.
 - Folder approvals are reloaded before every MCP request, so a revocation in the desktop app blocks the next request.
 - Read approval and write approval are separate. A folder is read-only unless the owner explicitly enables changes in the desktop app.
 - Text writes are limited to 1 MiB and use a temporary sibling file followed by atomic rename. The desktop file manager uses the same write policy and limit.

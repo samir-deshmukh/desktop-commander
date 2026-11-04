@@ -26,7 +26,8 @@ Status labels distinguish existing foundation from planned work.
 - [x] Add bounded UTF-8 append and regular-file copy with separate write approval.
 - [x] Add isolated integration coverage for read-only denial, write approval, create, move, delete, and confirmation checks.
 - [x] Add desktop file editing, file/folder creation, rename, and confirmed deletion controls, shown only for writable roots.
-- [x] Add MCP line-range reads and exact-count block edits with atomic writes and ambiguous-match rejection.
+- [x] Add MCP line-range reads (including negative tail-style offsets) and exact-count block edits with atomic writes and ambiguous-match rejection.
+- [x] Add bounded paginated recursive search sessions with next-page, list, and stop operations.
 - [x] Add a bounded local JSONL audit log shared by desktop and MCP processes, plus a recent-activity view; exclude file contents and command arguments.
 - [x] Expose recent MCP tool calls and aggregate usage statistics from the audit log.
 - [ ] Add a recovery/backup workflow before expanding mutation capabilities.

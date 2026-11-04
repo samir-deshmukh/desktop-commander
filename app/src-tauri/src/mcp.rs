@@ -19,7 +19,9 @@ use std::{
 
 const APP_IDENTIFIER: &str = "com.samdeshmukh.desktopcommander";
 const MAX_PREVIEW_BYTES: u64 = 1024 * 1024;
-const MAX_SEARCH_RESULTS: usize = 200;
+const MAX_SEARCH_RESULTS: usize = 1_000;
+const SEARCH_PAGE_SIZE: usize = 50;
+const MAX_SEARCH_SESSIONS: usize = 5;
 const MAX_SEARCH_VISITED: usize = 5_000;
 const MAX_SEARCH_DEPTH: usize = 12;
 const MAX_MULTI_READ_FILES: usize = 10;
@@ -38,7 +40,7 @@ struct ReadFileInput {
     /// Absolute path to a UTF-8 text file inside an approved folder.
     path: String,
     /// Zero-based starting line (default 0).
-    offset: Option<usize>,
+    offset: Option<i64>,
     /// Maximum number of lines to return (1-2000, default 200).
     length: Option<usize>,
 }
@@ -53,6 +55,44 @@ struct EditBlockInput {
     new_string: String,
     /// Expected number of exact matches (default 1).
     expected_replacements: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct StartSearchInput {
+    /// Approved directory in which to search.
+    path: String,
+    /// Case-insensitive substring to search for.
+    query: String,
+    /// Search file contents instead of file and directory names.
+    search_content: Option<bool>,
+    /// Maximum total matches to retain (1-1000, default 200).
+    max_results: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SearchSessionInput {
+    /// Search ID returned by start_search.
+    search_id: String,
+}
+
+#[derive(Serialize)]
+struct SearchPage {
+    search_id: String,
+    results: Vec<String>,
+    total_results: usize,
+    has_more: bool,
+}
+
+#[derive(Serialize)]
+struct SearchSessionSummary {
+    search_id: String,
+    total_results: usize,
+    remaining_results: usize,
+}
+
+struct SearchSession {
+    results: Vec<String>,
+    next_index: usize,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -241,6 +281,7 @@ struct DesktopCommanderMcp {
     policy: Arc<AccessPolicy>,
     audit_file: PathBuf,
     terminal_sessions: Arc<Mutex<std::collections::HashMap<String, McpTerminalSession>>>,
+    search_sessions: Arc<Mutex<std::collections::HashMap<String, SearchSession>>>,
 }
 
 fn terminal_output_reader(mut reader: Box<dyn std::io::Read + Send>, sender: SyncSender<String>) {
@@ -566,6 +607,64 @@ impl DesktopCommanderMcp {
     }
 
     #[tool(
+        description = "Start a bounded recursive filename or file-content search in an approved folder. Returns the first 50 matches and a search ID for pagination. Keeps at most 1,000 results and five active search sessions."
+    )]
+    fn start_search(&self, Parameters(args): Parameters<StartSearchInput>) -> String {
+        let result = self.start_search_inner(&args);
+        self.record_audit("start_search", Some(&args.path), result.is_ok());
+        match result {
+            Ok(page) => serde_json::to_string_pretty(&page)
+                .unwrap_or_else(|error| format!("ERROR: cannot serialize search page: {error}")),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(description = "Return the next page of up to 50 results from an active search session.")]
+    fn get_more_search_results(&self, Parameters(args): Parameters<SearchSessionInput>) -> String {
+        match self.get_more_search_results_inner(&args.search_id) {
+            Ok(page) => serde_json::to_string_pretty(&page)
+                .unwrap_or_else(|error| format!("ERROR: cannot serialize search page: {error}")),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "List active paginated search sessions and their remaining result counts."
+    )]
+    fn list_searches(&self) -> String {
+        match self.search_sessions.lock() {
+            Ok(sessions) => {
+                let summaries: Vec<_> = sessions
+                    .iter()
+                    .map(|(id, session)| SearchSessionSummary {
+                        search_id: id.clone(),
+                        total_results: session.results.len(),
+                        remaining_results: session.results.len().saturating_sub(session.next_index),
+                    })
+                    .collect();
+                serde_json::to_string_pretty(&summaries).unwrap_or_else(|error| {
+                    format!("ERROR: cannot serialize search sessions: {error}")
+                })
+            }
+            Err(_) => "ERROR: search session state unavailable".into(),
+        }
+    }
+
+    #[tool(description = "Stop and remove an active search session and its retained results.")]
+    fn stop_search(&self, Parameters(args): Parameters<SearchSessionInput>) -> String {
+        match self.search_sessions.lock() {
+            Ok(mut sessions) => {
+                if sessions.remove(&args.search_id).is_some() {
+                    "Search session stopped".into()
+                } else {
+                    "ERROR: search session not found".into()
+                }
+            }
+            Err(_) => "ERROR: search session state unavailable".into(),
+        }
+    }
+
+    #[tool(
         description = "Return recent MCP tool activity metadata from the local audit log. File contents and command arguments are not recorded."
     )]
     fn get_recent_tool_calls(&self, Parameters(args): Parameters<RecentToolCallsInput>) -> String {
@@ -704,12 +803,19 @@ impl DesktopCommanderMcp {
 
     fn read_file_inner(&self, args: &ReadFileInput) -> Result<String, String> {
         let content = self.read_text_file_inner(&args.path)?;
+        let lines: Vec<&str> = content.lines().collect();
         let offset = args.offset.unwrap_or(0);
+        let start = if offset < 0 {
+            lines.len().saturating_sub(offset.unsigned_abs() as usize)
+        } else {
+            (offset as usize).min(lines.len())
+        };
         let length = args.length.unwrap_or(200).clamp(1, 2_000);
-        Ok(content
-            .lines()
-            .skip(offset)
+        Ok(lines
+            .iter()
+            .skip(start)
             .take(length)
+            .copied()
             .collect::<Vec<_>>()
             .join("\n"))
     }
@@ -733,6 +839,78 @@ impl DesktopCommanderMcp {
         let updated = original.replace(&args.old_string, &args.new_string);
         super::write_approved_text_file(&self.policy, &target, &updated, true)?;
         Ok(count)
+    }
+
+    fn start_search_inner(&self, args: &StartSearchInput) -> Result<SearchPage, String> {
+        if args.query.trim().is_empty() {
+            return Err("Search query cannot be empty".into());
+        }
+        let limit = args.max_results.unwrap_or(200).clamp(1, MAX_SEARCH_RESULTS);
+        let results = if args.search_content.unwrap_or(false) {
+            self.search_content_inner(&ContentSearchInput {
+                path: args.path.clone(),
+                query: args.query.clone(),
+                max_results: Some(limit),
+            })?
+        } else {
+            self.search_files_inner(&SearchInput {
+                path: args.path.clone(),
+                query: args.query.clone(),
+                max_results: Some(limit),
+            })?
+        };
+        let search_id = format!(
+            "search-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let first_end = results.len().min(SEARCH_PAGE_SIZE);
+        let page = SearchPage {
+            search_id: search_id.clone(),
+            results: results[..first_end].to_vec(),
+            total_results: results.len(),
+            has_more: first_end < results.len(),
+        };
+        let mut sessions = self
+            .search_sessions
+            .lock()
+            .map_err(|_| "Search session state unavailable")?;
+        if sessions.len() >= MAX_SEARCH_SESSIONS {
+            return Err("At most five search sessions may be active".into());
+        }
+        sessions.insert(
+            search_id,
+            SearchSession {
+                results,
+                next_index: first_end,
+            },
+        );
+        Ok(page)
+    }
+
+    fn get_more_search_results_inner(&self, search_id: &str) -> Result<SearchPage, String> {
+        let mut sessions = self
+            .search_sessions
+            .lock()
+            .map_err(|_| "Search session state unavailable")?;
+        let session = sessions
+            .get_mut(search_id)
+            .ok_or("Search session not found")?;
+        let end = session
+            .next_index
+            .saturating_add(SEARCH_PAGE_SIZE)
+            .min(session.results.len());
+        let page = SearchPage {
+            search_id: search_id.to_owned(),
+            results: session.results[session.next_index..end].to_vec(),
+            total_results: session.results.len(),
+            has_more: end < session.results.len(),
+        };
+        session.next_index = end;
+        Ok(page)
     }
 
     fn search_files_inner(&self, args: &SearchInput) -> Result<Vec<String>, String> {
@@ -1050,7 +1228,7 @@ impl DesktopCommanderMcp {
         if !root.is_dir() {
             return Err("Search path is not a directory".into());
         }
-        let limit = args.max_results.unwrap_or(50).clamp(1, 100);
+        let limit = args.max_results.unwrap_or(200).clamp(1, MAX_SEARCH_RESULTS);
         let query = args.query.to_lowercase();
         let mut pending = vec![(root, 0usize)];
         let mut matches = Vec::new();
@@ -1158,6 +1336,7 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         policy: Arc::new(policy),
         audit_file,
         terminal_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        search_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
     }
     .serve(stdio())
     .await?;
@@ -1200,6 +1379,7 @@ mod tests {
             policy: Arc::new(policy),
             audit_file,
             terminal_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            search_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
         (server, base)
     }
@@ -1229,6 +1409,16 @@ mod tests {
                 })
                 .unwrap(),
             "second"
+        );
+        assert_eq!(
+            server
+                .read_file_inner(&ReadFileInput {
+                    path: root.join("lines.txt").to_string_lossy().into_owned(),
+                    offset: Some(-2),
+                    length: Some(2),
+                })
+                .unwrap(),
+            "second\nthird"
         );
         fs::write(root.join("edit.txt"), "alpha beta alpha").unwrap();
         assert!(
@@ -1261,6 +1451,37 @@ mod tests {
             fs::read_to_string(root.join("edit.txt")).unwrap(),
             "gamma beta gamma"
         );
+
+        for index in 0..60 {
+            fs::write(root.join(format!("match-{index:03}.txt")), "search fixture").unwrap();
+        }
+        let search_page = server
+            .start_search_inner(&StartSearchInput {
+                path: root.to_string_lossy().into_owned(),
+                query: "match-".into(),
+                search_content: Some(false),
+                max_results: Some(100),
+            })
+            .unwrap();
+        assert_eq!(search_page.results.len(), 50);
+        assert!(search_page.has_more);
+        let next_page = server
+            .get_more_search_results_inner(&search_page.search_id)
+            .unwrap();
+        assert_eq!(next_page.results.len(), 10);
+        assert!(!next_page.has_more);
+        assert!(
+            server
+                .search_sessions
+                .lock()
+                .unwrap()
+                .contains_key(&search_page.search_id)
+        );
+        server
+            .search_sessions
+            .lock()
+            .unwrap()
+            .remove(&search_page.search_id);
 
         let info = server
             .get_file_info_inner(root.join("note.txt").to_str().expect("file path"))
