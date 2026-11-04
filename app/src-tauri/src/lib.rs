@@ -2,12 +2,17 @@
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "desktop")]
-use std::{collections::HashMap, io::Write, thread, time::Duration};
+use std::{
+    collections::HashMap,
+    io::{BufRead, BufReader, Write},
+    process::{Command, Stdio},
+    thread,
+    time::Duration,
+};
 use std::{
     fs,
-    io::{BufRead, BufReader, Read},
+    io::Read,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     sync::Mutex,
 };
 #[cfg(feature = "desktop")]
