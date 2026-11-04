@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, io::Write, thread, time::Duration};
 use std::{
     fs,
-    io::Read,
+    io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     sync::Mutex,
 };
 #[cfg(feature = "desktop")]
@@ -530,6 +531,95 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
             "get_usage_stats",
         ],
     })
+}
+
+#[cfg(feature = "desktop")]
+fn mcp_stdio_request(
+    method: &str,
+    params: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let info = mcp_server_info()?;
+    if !info.binary_exists {
+        return Err("MCP server binary is not built. Build sam-desktop-mcp first.".into());
+    }
+    let mut child = Command::new(&info.command)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Cannot start MCP server: {e}"))?;
+    let mut input = child.stdin.take().ok_or("MCP stdin unavailable")?;
+    let output = child.stdout.take().ok_or("MCP stdout unavailable")?;
+    let mut reader = BufReader::new(output);
+    let send =
+        |writer: &mut std::process::ChildStdin, message: serde_json::Value| -> Result<(), String> {
+            writeln!(writer, "{}", message).map_err(|e| format!("Cannot send MCP request: {e}"))?;
+            writer
+                .flush()
+                .map_err(|e| format!("Cannot flush MCP request: {e}"))
+        };
+    let receive = |reader: &mut BufReader<std::process::ChildStdout>,
+                   expected: u64|
+     -> Result<serde_json::Value, String> {
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .map_err(|e| format!("Cannot read MCP response: {e}"))?;
+        if line.is_empty() {
+            return Err("MCP server closed before responding".into());
+        }
+        let response: serde_json::Value =
+            serde_json::from_str(&line).map_err(|e| format!("Invalid MCP response: {e}"))?;
+        if response.get("id").and_then(|v| v.as_u64()) != Some(expected) {
+            return Err("MCP server returned an unexpected response ID".into());
+        }
+        if let Some(error) = response.get("error") {
+            return Err(format!("MCP request failed: {error}"));
+        }
+        Ok(response
+            .get("result")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null))
+    };
+    send(
+        &mut input,
+        serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"sams-desktop-agent","version":"0.1.0"}}}),
+    )?;
+    receive(&mut reader, 1)?;
+    send(
+        &mut input,
+        serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+    )?;
+    let mut request = serde_json::json!({"jsonrpc":"2.0","id":2,"method":method});
+    if let Some(params) = params {
+        request["params"] = params;
+    }
+    send(&mut input, request)?;
+    let result = receive(&mut reader, 2);
+    drop(input);
+    let _ = child.wait();
+    result
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn mcp_agent_discover_tools() -> Result<serde_json::Value, String> {
+    mcp_stdio_request("tools/list", None)
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn mcp_agent_call_tool(
+    name: String,
+    arguments: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    if name.is_empty() || name.len() > 128 {
+        return Err("Invalid MCP tool name".into());
+    }
+    mcp_stdio_request(
+        "tools/call",
+        Some(serde_json::json!({"name":name,"arguments":arguments})),
+    )
 }
 
 #[cfg(feature = "desktop")]
@@ -1146,6 +1236,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             mcp_server_info,
+            mcp_agent_discover_tools,
+            mcp_agent_call_tool,
             list_processes,
             terminate_process,
             recent_activity,

@@ -4,7 +4,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 ## Project status
 
-**Phase:** Local desktop foundation with permissioned filesystem, interactive terminal, process management, read-only accessibility inspection, and MCP activity history
+**Phase:** Local desktop foundation with permissioned filesystem, interactive terminal, process management, MCP activity history, and an in-app MCP-connected AI task agent
 **Initial platform:** Linux Mint (Ubuntu-based)
 **Initial mode:** Local-only
 **Remote integration:** Architecture documented for OpenAI Secure MCP Tunnel; not enabled. ChatGPT Free cannot currently add custom MCP servers.
@@ -20,6 +20,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - Current-user process inspection and confirmed SIGTERM controls, with the application and MCP processes protected.
 - Read-only Linux AT-SPI2 application discovery and bounded accessibility-tree snapshots through MCP, with per-call confirmation.
 - Local activity history shared by desktop and MCP actions, without storing file contents or command arguments.
+- In-app AI task agent: the model selects MCP tools and runs a bounded tool-call loop; local MCP permissions remain authoritative.
 - Interactive local PTY terminal using the desktop user's configured shell; the selected approved folder is only the initial working directory, not a sandbox.
 - Unit tests for approval persistence, filesystem authorization, bounded reads, and process metadata filtering.
 - Separate `sam-desktop-mcp` STDIO server built with the official Rust `rmcp` SDK.
@@ -28,7 +29,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 ### Still outstanding
 
-- MCP client compatibility testing across individual AI applications; the automated local STDIO integration test passes, but each client still needs its own configuration test.
+- Live AI-provider loop testing with a configured API key; the agent frontend and local MCP bridge are implemented, but the provider workflow still needs an end-to-end run.
 - Terminal lifecycle tests in the running desktop app (shell exit, resize, output floods, and additional child-process cases).
 - Process-exit race and stale-PID checks.
 - Remaining original Desktop Commander MCP tools and compatibility checks. Configuration updates and basic PDF create/page-edit operations are now implemented. Generic keyboard/mouse automation and screenshot capture are outside the intended feature scope. Authenticated ChatGPT connectivity is also not enabled; client availability depends on the client and account.
@@ -66,6 +67,7 @@ Tauri, Rust, React, and TypeScript are in the current implementation. Their depe
 - [Local MCP client setup and protocol test](docs/local-mcp-clients.md)
 - [MCP protocol details and repeatable integration test](docs/MCP_PROTOCOL.md)
 - [AI workflow guide: inspect, act, verify](docs/AI_WORKFLOW_GUIDE.md)
+- [In-app AI agent and MCP execution path](docs/AI_AGENT.md)
 - [ChatGPT remote integration requirements](docs/CHATGPT_INTEGRATION.md)
 - [Linux desktop automation evaluation](docs/DESKTOP_AUTOMATION_EVALUATION.md)
 

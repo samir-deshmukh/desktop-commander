@@ -80,3 +80,24 @@ nav { display: grid; gap: 5px; }.nav-item { display: flex; align-items: center; 
 .ai-proposal { display:grid; gap:12px; border:1px solid #394331; border-radius:7px; padding:12px; background:#131810; }
 .ai-proposal-editor { min-height:220px; max-height:480px; resize:vertical; white-space:pre; }
 @media (max-width:850px) { .ai-provider-fields { grid-template-columns:1fr; }.ai-editor-heading,.ai-proposal-heading { align-items:flex-start; flex-direction:column; } }
+
+/* In-app MCP tool-using agent */
+.agent-panel { display:grid; gap:16px; }
+.agent-provider-fields { display:grid; grid-template-columns:1fr 1fr 1.3fr; gap:10px; }
+.agent-provider-fields label { display:grid; gap:6px; color:#9299a7; font-size:10px; }
+.agent-provider-fields input { width:100%; min-width:0; border:1px solid #353a46; border-radius:6px; padding:9px 10px; background:#0d1016; color:#d7dbe3; font:10px/1.6 'DM Mono',monospace; }
+.agent-transcript { min-height:300px; max-height:52vh; overflow:auto; display:flex; flex-direction:column; gap:12px; padding:16px; border:1px solid #292d37; border-radius:8px; background:#0d1016; }
+.agent-empty { flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; gap:9px; color:#9299a7; }
+.agent-empty span { color:#c7e97b; font-size:24px; }
+.agent-empty strong { color:#e2e6ec; font-size:13px; }
+.agent-empty p { max-width:440px; font-size:11px; line-height:1.7; }
+.agent-message { max-width:88%; padding:10px 12px; border-radius:8px; background:#171b24; border:1px solid #292d37; }
+.agent-message.user { align-self:flex-end; background:#20291a; border-color:#394331; }
+.agent-message strong { display:block; color:#c7e97b; font-size:10px; margin-bottom:5px; }
+.agent-message.user strong { color:#e1e8d6; }
+.agent-message p { white-space:pre-wrap; overflow-wrap:anywhere; color:#d0d5df; font-size:11px; line-height:1.65; }
+.agent-running { display:flex; align-items:center; gap:8px; color:#aab1bf; font-size:10px; }
+.agent-compose { display:flex; align-items:flex-end; gap:10px; }
+.agent-compose textarea { flex:1; min-width:0; resize:vertical; border:1px solid #353a46; border-radius:7px; padding:11px; background:#0d1016; color:#e2e6ec; font:11px/1.6 'DM Mono',monospace; }
+.agent-compose .primary-button { min-height:40px; white-space:nowrap; }
+@media (max-width:850px) { .agent-provider-fields { grid-template-columns:1fr; }.agent-compose { align-items:stretch; flex-direction:column; }.agent-message { max-width:100%; } }
