@@ -27,7 +27,7 @@ mod mcp;
 #[cfg(any(feature = "desktop", feature = "mcp"))]
 mod processes;
 #[cfg(feature = "mcp")]
-pub use mcp::run_stdio_server;
+pub use mcp::{run_http_server, run_stdio_server};
 
 #[cfg(feature = "desktop")]
 struct PtySession {

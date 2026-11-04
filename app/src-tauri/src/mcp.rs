@@ -2920,3 +2920,64 @@ mod tests {
         fs::remove_dir_all(base).expect("cleanup test files");
     }
 }
+
+pub async fn run_http_server() -> Result<(), Box<dyn std::error::Error>> {
+    use axum::{
+        Router,
+        extract::Request,
+        http::{StatusCode, header::AUTHORIZATION},
+        middleware::{self, Next},
+        response::Response,
+    };
+    use rmcp::transport::{
+        StreamableHttpServerConfig, StreamableHttpService,
+        streamable_http_server::session::local::LocalSessionManager,
+    };
+    use std::sync::Arc;
+
+    async fn authorize(request: Request, next: Next) -> Result<Response, StatusCode> {
+        let expected =
+            std::env::var("SAM_DESKTOP_MCP_TOKEN").map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+        let supplied = request
+            .headers()
+            .get(AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        let supplied = supplied.strip_prefix("Bearer ").unwrap_or_default();
+        use subtle::ConstantTimeEq;
+        if supplied.as_bytes().ct_eq(expected.as_bytes()).unwrap_u8() != 1 {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+        Ok(next.run(request).await)
+    }
+
+    let data_dir = application_data_dir().map_err(std::io::Error::other)?;
+    fs::create_dir_all(&data_dir)?;
+    let policy = Arc::new(
+        AccessPolicy::load(data_dir.join("approved_folders.json"))
+            .map_err(std::io::Error::other)?,
+    );
+    let audit_file = policy.audit_path();
+    let factory_policy = policy.clone();
+    let service = StreamableHttpService::new(
+        move || {
+            Ok(DesktopCommanderMcp {
+                policy: factory_policy.clone(),
+                audit_file: audit_file.clone(),
+                terminal_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+                search_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            })
+        },
+        Arc::new(LocalSessionManager::default()),
+        StreamableHttpServerConfig::default(),
+    );
+    let app = Router::new()
+        .nest_service("/mcp", service)
+        .route_layer(middleware::from_fn(authorize));
+    let address =
+        std::env::var("SAM_DESKTOP_MCP_BIND").unwrap_or_else(|_| "127.0.0.1:18765".into());
+    let listener = tokio::net::TcpListener::bind(&address).await?;
+    eprintln!("Sam Desktop MCP HTTP listening on {address}; endpoint /mcp");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
