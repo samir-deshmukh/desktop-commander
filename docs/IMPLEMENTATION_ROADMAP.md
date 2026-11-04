@@ -41,6 +41,7 @@ Status labels distinguish existing foundation from planned work.
 - [x] Add current-user process inspection, capped at 500 entries and excluding command-line/environment collection.
 - [x] Add opt-in MCP one-shot command execution, disabled by default, with per-call confirmation, direct process invocation (no shell), approved working directory, timeout, and bounded output.
 - [x] Add interactive MCP PTY sessions with start/write/read/list/close tools, a three-session cap, bounded input/output, and shell cleanup on close.
+- [x] Revoke active MCP terminal sessions when command execution is disabled; verify through the real STDIO integration harness.
 - [x] Add current-user process listing to MCP and confirmed SIGTERM for eligible current-user PIDs; protect PID 1 and the app/MCP processes.
 - [x] Add a process Stop action in the desktop UI with a confirmation prompt.
 - [x] Test termination against an isolated child process owned by the test runner.

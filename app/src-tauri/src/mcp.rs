@@ -848,6 +848,10 @@ impl DesktopCommanderMcp {
     }
 
     fn write_terminal_inner(&self, session_id: &str, data: &str) -> Result<(), String> {
+        if !self.policy.command_execution_allowed()? {
+            let _ = self.close_terminal_inner(session_id);
+            return Err("MCP command execution was disabled; terminal session closed".into());
+        }
         if data.len() > 16 * 1024 {
             return Err("Terminal input chunk exceeds 16 KiB".into());
         }
@@ -869,6 +873,10 @@ impl DesktopCommanderMcp {
     }
 
     fn read_terminal_inner(&self, session_id: &str) -> Result<TerminalReadOutput, String> {
+        if !self.policy.command_execution_allowed()? {
+            let _ = self.close_terminal_inner(session_id);
+            return Err("MCP command execution was disabled; terminal session closed".into());
+        }
         const MAX_READ_BYTES: usize = 64 * 1024;
         let mut sessions = self
             .terminal_sessions
@@ -1430,6 +1438,52 @@ mod tests {
                 .unwrap()
                 .contains_key(&terminal_id)
         );
+
+        let revoked_terminal = server
+            .start_terminal_inner(&StartTerminalInput {
+                cwd: root.to_string_lossy().into_owned(),
+                cols: Some(80),
+                rows: Some(24),
+                confirm: true,
+            })
+            .unwrap();
+        let policy_file = base.join("approvals.json");
+        let approved_root = root.canonicalize().unwrap();
+        fs::write(
+            &policy_file,
+            serde_json::json!({
+                "version": 1,
+                "folders": [approved_root.to_string_lossy()],
+                "writable_folders": [approved_root.to_string_lossy()],
+                "command_execution_enabled": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(
+            server
+                .write_terminal_inner(&revoked_terminal, "echo must-not-run\n")
+                .is_err()
+        );
+        assert!(
+            !server
+                .terminal_sessions
+                .lock()
+                .unwrap()
+                .contains_key(&revoked_terminal)
+        );
+        fs::write(
+            &policy_file,
+            serde_json::json!({
+                "version": 1,
+                "folders": [approved_root.to_string_lossy()],
+                "writable_folders": [approved_root.to_string_lossy()],
+                "command_execution_enabled": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+        server.policy.refresh().unwrap();
 
         let large_file = root.join("large.txt");
         fs::write(&large_file, vec![b'x'; MAX_PREVIEW_BYTES as usize + 1])

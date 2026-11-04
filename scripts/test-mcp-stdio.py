@@ -297,6 +297,31 @@ def main() -> int:
             assert "closed" in closed.lower()
             passed.append("interactive terminal start, input, output, and close")
 
+            second_terminal = response_text(client.request(
+                "tools/call", {"name": "start_terminal", "arguments": {
+                    "cwd": canonical, "cols": 80, "rows": 24, "confirm": True
+                }}
+            )).split(": ", 1)[1]
+            policy_file.write_text(json.dumps({
+                "version": 1, "folders": [canonical],
+                "writable_folders": [canonical], "command_execution_enabled": False
+            }), encoding="utf-8")
+            revoked_input = response_text(client.request(
+                "tools/call", {"name": "write_terminal", "arguments": {
+                    "session_id": second_terminal, "data": "echo must-not-run\n"
+                }}
+            ))
+            assert "disabled" in revoked_input.lower()
+            remaining_sessions = json.loads(response_text(client.request(
+                "tools/call", {"name": "list_terminal_sessions", "arguments": {}}
+            )))
+            assert second_terminal not in remaining_sessions
+            policy_file.write_text(json.dumps({
+                "version": 1, "folders": [canonical],
+                "writable_folders": [canonical], "command_execution_enabled": True
+            }), encoding="utf-8")
+            passed.append("disabling command access revokes active terminal sessions")
+
             process_snapshot = json.loads(response_text(client.request(
                 "tools/call", {"name": "list_processes", "arguments": {}}
             )))

@@ -91,7 +91,7 @@ Each AI application has its own configuration file and may use a different confi
 - MCP command execution is disabled by default and must be enabled in the desktop app. Each call also requires confirm=true.
 - Commands are launched directly without shell interpretation, with a 30-second timeout and 256 KiB caps for stdout and stderr.
 - Commands run with the desktop user's normal OS permissions; an approved working directory is not a sandbox.
-- Interactive MCP terminal sessions use a local PTY, require command access to be enabled and confirm=true when starting, and are limited to three concurrent sessions.
+- Interactive MCP terminal sessions use a local PTY, require command access to be enabled and confirm=true when starting, and are limited to three concurrent sessions. Disabling command access closes an active session on its next read or input request.
 - Terminal input is capped at 16 KiB per call; output is delivered in chunks through a bounded channel. Closing the session kills and reaps its shell.
 - Process inspection is limited to the current Linux user, capped at 500 entries, and omits command-line arguments and environment variables.
 - Process termination requires confirm=true and sends SIGTERM only. PID 1, the current MCP process, and Sam's Desktop Commander processes are protected.
