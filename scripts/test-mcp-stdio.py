@@ -38,9 +38,9 @@ class McpProcess:
         self.process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
         self.process.stdin.flush()
 
-    def receive(self, expected_id: int) -> dict[str, Any]:
+    def receive(self, expected_id: int, timeout_seconds: float = 3) -> dict[str, Any]:
         assert self.process.stdout is not None
-        ready, _, _ = select.select([self.process.stdout], [], [], 3)
+        ready, _, _ = select.select([self.process.stdout], [], [], timeout_seconds)
         if not ready:
             raise TimeoutError(f"Timed out waiting for MCP response id={expected_id}")
         line = self.process.stdout.readline()
@@ -54,14 +54,14 @@ class McpProcess:
             raise AssertionError(f"MCP request failed: {response['error']!r}")
         return response.get("result", {})
 
-    def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def request(self, method: str, params: dict[str, Any] | None = None, timeout_seconds: float = 3) -> dict[str, Any]:
         request_id = self.next_id
         self.next_id += 1
         message: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "method": method}
         if params is not None:
             message["params"] = params
         self.send(message)
-        return self.receive(request_id)
+        return self.receive(request_id, timeout_seconds)
 
     def notify(self, method: str) -> None:
         self.send({"jsonrpc": "2.0", "method": method})
@@ -129,7 +129,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "start_search", "get_more_search_results", "list_searches", "stop_search", "write_text_file", "write_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "interact_with_process", "read_terminal", "read_process_output", "close_terminal", "force_terminate", "list_terminal_sessions", "list_sessions", "list_accessible_apps", "read_accessibility_tree", "list_processes", "terminate_process", "kill_process", "get_config", "set_config_value", "get_recent_tool_calls", "get_usage_stats"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "start_search", "get_more_search_results", "list_searches", "stop_search", "write_text_file", "write_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "interact_with_process", "read_terminal", "read_process_output", "close_terminal", "force_terminate", "list_terminal_sessions", "list_sessions", "list_accessible_apps", "read_accessibility_tree", "list_processes", "terminate_process", "kill_process", "get_config", "set_config_value", "write_pdf", "get_recent_tool_calls", "get_usage_stats"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -235,6 +235,49 @@ def main() -> int:
             assert alias_write == "File written successfully"
             assert alias_target.read_text(encoding="utf-8") == "alias write passed"
             passed.append("Desktop Commander write_file compatibility alias")
+
+            pdf_source = approved / "pdf-source.pdf"
+            pdf_create = response_text(client.request(
+                "tools/call", {"name": "write_pdf", "arguments": {
+                    "path": str(pdf_source),
+                    "content": "# First page\nA PDF generated from Markdown.\n\n<div style=\"page-break-before: always;\"></div>\n\n# Second page\nSecond page content."
+                }}, timeout_seconds=60
+            ))
+            assert "PDF written successfully" in pdf_create
+            assert pdf_source.read_bytes().startswith(b"%PDF-")
+            with tempfile.TemporaryDirectory(prefix="sam-pdf-test-") as page_dir:
+                page_pattern = str(Path(page_dir) / "page-%d.pdf")
+                subprocess.run(["pdfseparate", str(pdf_source), page_pattern], check=True, capture_output=True)
+                source_page_count = len(list(Path(page_dir).glob("page-*.pdf")))
+                assert source_page_count == 2, f"Expected 2 rendered pages, got {source_page_count}"
+
+            pdf_modified = approved / "pdf-modified.pdf"
+            pdf_edit = response_text(client.request(
+                "tools/call", {"name": "write_pdf", "arguments": {
+                    "path": str(pdf_source), "outputPath": str(pdf_modified),
+                    "content": [{"type": "delete", "pageIndexes": [0]}]
+                }}, timeout_seconds=60
+            ))
+            assert "PDF written successfully" in pdf_edit
+            with tempfile.TemporaryDirectory(prefix="sam-pdf-test-") as page_dir:
+                page_pattern = str(Path(page_dir) / "page-%d.pdf")
+                subprocess.run(["pdfseparate", str(pdf_modified), page_pattern], check=True, capture_output=True)
+                modified_page_count = len(list(Path(page_dir).glob("page-*.pdf")))
+                assert modified_page_count == 1, f"Expected 1 modified page, got {modified_page_count}"
+            pdf_inserted = approved / "pdf-inserted.pdf"
+            pdf_insert = response_text(client.request(
+                "tools/call", {"name": "write_pdf", "arguments": {
+                    "path": str(pdf_source), "outputPath": str(pdf_inserted),
+                    "content": [{"type": "insert", "pageIndex": 1, "markdown": "# Inserted page\nAdded through an ordered page operation."}]
+                }}, timeout_seconds=60
+            ))
+            assert "PDF written successfully" in pdf_insert
+            with tempfile.TemporaryDirectory(prefix="sam-pdf-test-") as page_dir:
+                page_pattern = str(Path(page_dir) / "page-%d.pdf")
+                subprocess.run(["pdfseparate", str(pdf_inserted), page_pattern], check=True, capture_output=True)
+                inserted_page_count = len(list(Path(page_dir).glob("page-*.pdf")))
+                assert inserted_page_count == 3, f"Expected 3 pages after insertion, got {inserted_page_count}"
+            passed.append("PDF creation, page deletion, and page insertion")
 
             ranged = response_text(client.request(
                 "tools/call", {"name": "read_file", "arguments": {

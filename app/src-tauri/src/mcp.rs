@@ -382,6 +382,17 @@ struct SetConfigValueInput {
     confirm: bool,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct WritePdfInput {
+    /// Existing approved PDF to modify, or destination path for a new PDF.
+    path: String,
+    /// Markdown string to create a PDF, or an ordered array of page operations.
+    content: serde_json::Value,
+    /// Required output path when modifying an existing PDF; optional for creation.
+    #[serde(rename = "outputPath")]
+    output_path: Option<String>,
+}
+
 #[derive(Serialize)]
 struct McpServerConfig {
     approved_folders: Vec<String>,
@@ -498,6 +509,353 @@ struct DesktopCommanderMcp {
     audit_file: PathBuf,
     terminal_sessions: Arc<Mutex<std::collections::HashMap<String, McpTerminalSession>>>,
     search_sessions: Arc<Mutex<std::collections::HashMap<String, SearchSession>>>,
+}
+
+struct PdfTempDir(PathBuf);
+
+impl PdfTempDir {
+    fn new() -> Result<Self, String> {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "System clock is before the Unix epoch")?
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("sam-pdf-{}-{nonce}", std::process::id()));
+        fs::create_dir(&path)
+            .map_err(|error| format!("Cannot create temporary PDF workspace: {error}"))?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for PdfTempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn markdown_inline(value: &str) -> String {
+    let escaped = html_escape(value);
+    let mut output = String::new();
+    let mut chars = escaped.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '*' && chars.peek() == Some(&'*') {
+            chars.next();
+            output.push_str("<strong>");
+            let mut inner = String::new();
+            while let Some(next) = chars.next() {
+                if next == '*' && chars.peek() == Some(&'*') {
+                    chars.next();
+                    break;
+                }
+                inner.push(next);
+            }
+            output.push_str(&inner);
+            output.push_str("</strong>");
+        } else if ch == '`' {
+            output.push_str("<code>");
+            let mut inner = String::new();
+            while let Some(next) = chars.next() {
+                if next == '`' {
+                    break;
+                }
+                inner.push(next);
+            }
+            output.push_str(&inner);
+            output.push_str("</code>");
+        } else {
+            output.push(ch);
+        }
+    }
+    output
+}
+
+fn markdown_to_html(markdown: &str) -> String {
+    let mut body = String::new();
+    let mut paragraph = Vec::<String>::new();
+    let mut list_open = false;
+    let mut code_open = false;
+    let mut code = String::new();
+    let flush_paragraph = |body: &mut String, paragraph: &mut Vec<String>| {
+        if !paragraph.is_empty() {
+            body.push_str("<p>");
+            body.push_str(&markdown_inline(&paragraph.join(" ")));
+            body.push_str("</p>\n");
+            paragraph.clear();
+        }
+    };
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            flush_paragraph(&mut body, &mut paragraph);
+            if list_open {
+                body.push_str("</ul>\n");
+                list_open = false;
+            }
+            if code_open {
+                body.push_str("<pre><code>");
+                body.push_str(&html_escape(&code));
+                body.push_str("</code></pre>\n");
+                code.clear();
+                code_open = false;
+            } else {
+                code_open = true;
+            }
+            continue;
+        }
+        if code_open {
+            code.push_str(line);
+            code.push('\n');
+            continue;
+        }
+        if trimmed.contains("<div style=\"page-break-before: always;\"></div>")
+            || trimmed.contains("<div style='page-break-before: always;'></div>")
+        {
+            flush_paragraph(&mut body, &mut paragraph);
+            if list_open {
+                body.push_str("</ul>\n");
+                list_open = false;
+            }
+            body.push_str("<div style=\"page-break-before: always;\"></div>\n");
+            continue;
+        }
+        if trimmed.is_empty() {
+            flush_paragraph(&mut body, &mut paragraph);
+            if list_open {
+                body.push_str("</ul>\n");
+                list_open = false;
+            }
+            continue;
+        }
+        let heading = (1..=6).find_map(|level| {
+            let prefix = format!("{} ", "#".repeat(level));
+            trimmed.strip_prefix(&prefix).map(|text| (level, text))
+        });
+        if let Some((level, text)) = heading {
+            flush_paragraph(&mut body, &mut paragraph);
+            if list_open {
+                body.push_str("</ul>\n");
+                list_open = false;
+            }
+            body.push_str(&format!("<h{level}>{}</h{level}>\n", markdown_inline(text)));
+        } else if ["- ", "* ", "+ "]
+            .iter()
+            .any(|prefix| trimmed.starts_with(prefix))
+        {
+            flush_paragraph(&mut body, &mut paragraph);
+            if !list_open {
+                body.push_str("<ul>\n");
+                list_open = true;
+            }
+            body.push_str(&format!("<li>{}</li>\n", markdown_inline(&trimmed[2..])));
+        } else if let Some(quote) = trimmed.strip_prefix("> ") {
+            flush_paragraph(&mut body, &mut paragraph);
+            if list_open {
+                body.push_str("</ul>\n");
+                list_open = false;
+            }
+            body.push_str(&format!(
+                "<blockquote>{}</blockquote>\n",
+                markdown_inline(quote)
+            ));
+        } else {
+            if list_open {
+                body.push_str("</ul>\n");
+                list_open = false;
+            }
+            paragraph.push(trimmed.to_string());
+        }
+    }
+    flush_paragraph(&mut body, &mut paragraph);
+    if list_open {
+        body.push_str("</ul>\n");
+    }
+    if code_open {
+        body.push_str("<pre><code>");
+        body.push_str(&html_escape(&code));
+        body.push_str("</code></pre>\n");
+    }
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><style>@page{{size:A4;margin:20mm}}body{{font-family:'Liberation Sans',sans-serif;font-size:11pt;line-height:1.45;color:#222}}h1,h2,h3,h4,h5,h6{{color:#111;page-break-after:avoid}}pre,code{{font-family:'Liberation Mono',monospace;white-space:pre-wrap}}blockquote{{border-left:3px solid #999;padding-left:12px;color:#555}}li{{margin:3px 0}}</style></head><body>{body}</body></html>"
+    )
+}
+
+fn run_pdf_command(mut command: Command, description: &str) -> Result<(), String> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            format!("Cannot start {description}; install the required PDF utility: {error}")
+        })?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let output = child
+                    .wait_with_output()
+                    .map_err(|error| format!("Cannot collect {description} output: {error}"))?;
+                if output.status.success() {
+                    return Ok(());
+                }
+                return Err(format!(
+                    "{description} failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            Ok(None) if started.elapsed() > Duration::from_secs(45) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{description} timed out after 45 seconds"));
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+            Err(error) => {
+                let _ = child.kill();
+                return Err(format!("Cannot monitor {description}: {error}"));
+            }
+        }
+    }
+}
+
+fn render_markdown_pdf(markdown: &str, workspace: &Path, prefix: &str) -> Result<PathBuf, String> {
+    let normalized = markdown
+        .replace(
+            "<div style=\"page-break-before: always;\"></div>",
+            "\n\n__SAM_PDF_PAGE_BREAK__\n\n",
+        )
+        .replace(
+            "<div style='page-break-before: always;'></div>",
+            "\n\n__SAM_PDF_PAGE_BREAK__\n\n",
+        );
+    let sections: Vec<&str> = normalized.split("__SAM_PDF_PAGE_BREAK__").collect();
+    if sections.len() == 1 {
+        return render_markdown_chunk_pdf(markdown, workspace, prefix);
+    }
+    let mut pages = Vec::new();
+    for (index, section) in sections.iter().enumerate() {
+        let part =
+            render_markdown_chunk_pdf(section, workspace, &format!("{prefix}-section-{index}"))?;
+        pages.extend(split_pdf(
+            &part,
+            workspace,
+            &format!("{prefix}-section-{index}-page"),
+        )?);
+    }
+    if pages.is_empty() {
+        return Err("Markdown did not produce any PDF pages".into());
+    }
+    let merged = workspace.join(format!("{prefix}-sections.pdf"));
+    merge_pdfs(&pages, &merged)?;
+    Ok(merged)
+}
+
+fn render_markdown_chunk_pdf(
+    markdown: &str,
+    workspace: &Path,
+    prefix: &str,
+) -> Result<PathBuf, String> {
+    let html_path = workspace.join(format!("{prefix}.html"));
+    fs::write(&html_path, markdown_to_html(markdown))
+        .map_err(|error| format!("Cannot write temporary PDF HTML: {error}"))?;
+    let output_dir = workspace.join(format!("{prefix}-rendered"));
+    fs::create_dir(&output_dir)
+        .map_err(|error| format!("Cannot create PDF render folder: {error}"))?;
+    let profile = workspace.join(format!("{prefix}-lo-profile"));
+    let mut command = Command::new("libreoffice");
+    command.args([
+        "--headless",
+        &format!("-env:UserInstallation=file://{}", profile.display()),
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        output_dir.to_string_lossy().as_ref(),
+        html_path.to_string_lossy().as_ref(),
+    ]);
+    run_pdf_command(command, "LibreOffice PDF rendering")?;
+    let rendered = output_dir.join(format!("{prefix}.pdf"));
+    if !rendered.is_file() {
+        return Err("LibreOffice did not produce a PDF file".into());
+    }
+    Ok(rendered)
+}
+
+fn split_pdf(source: &Path, workspace: &Path, prefix: &str) -> Result<Vec<PathBuf>, String> {
+    let pattern = workspace.join(format!("{prefix}-%d.pdf"));
+    let mut command = Command::new("pdfseparate");
+    command.arg(source).arg(&pattern);
+    run_pdf_command(command, "Poppler pdfseparate")?;
+    let mut pages = Vec::new();
+    for entry in fs::read_dir(workspace)
+        .map_err(|error| format!("Cannot list temporary PDF pages: {error}"))?
+    {
+        let entry = entry.map_err(|error| format!("Cannot inspect temporary PDF page: {error}"))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some(number) = name
+            .strip_prefix(&format!("{prefix}-"))
+            .and_then(|value| value.strip_suffix(".pdf"))
+            .and_then(|value| value.parse::<usize>().ok())
+        {
+            pages.push((number, entry.path()));
+        }
+    }
+    pages.sort_by_key(|(number, _)| *number);
+    Ok(pages.into_iter().map(|(_, path)| path).collect())
+}
+
+fn merge_pdfs(pages: &[PathBuf], output: &Path) -> Result<(), String> {
+    if pages.is_empty() {
+        return Err("Cannot merge an empty PDF page list".into());
+    }
+    let mut command = Command::new("pdfunite");
+    command.args(pages).arg(output);
+    run_pdf_command(command, "Poppler pdfunite")
+}
+
+fn write_new_file_without_overwrite(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or("PDF output path has no parent directory")?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "System clock is before the Unix epoch")?
+        .as_nanos();
+    let temporary = parent.join(format!(".sam-pdf-{}-{nonce}.tmp", std::process::id()));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|error| format!("Cannot create temporary PDF output: {error}"))?;
+    let write_result = file.write_all(bytes).and_then(|_| file.sync_all());
+    drop(file);
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!(
+            "Cannot write or sync temporary PDF output: {error}"
+        ));
+    }
+    match fs::hard_link(&temporary, path) {
+        Ok(()) => {
+            let _ = fs::remove_file(&temporary);
+            Ok(())
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&temporary);
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                Err("PDF output already exists; refusing to overwrite it".into())
+            } else {
+                Err(format!(
+                    "Cannot finalize PDF without overwriting an existing file: {error}"
+                ))
+            }
+        }
+    }
 }
 
 fn terminal_output_reader(mut reader: Box<dyn std::io::Read + Send>, sender: SyncSender<String>) {
@@ -948,6 +1306,19 @@ impl DesktopCommanderMcp {
         self.record_audit("set_config_value", Some(&args.key), result.is_ok());
         match result {
             Ok(()) => format!("Configuration value '{}' updated", args.key),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Create a PDF from Markdown or modify a PDF by inserting/deleting pages. Outputs are written only to approved writable folders and existing files are never overwritten. Requires LibreOffice and Poppler PDF utilities on Linux."
+    )]
+    fn write_pdf(&self, Parameters(args): Parameters<WritePdfInput>) -> String {
+        let result = self.write_pdf_inner(&args);
+        let target = args.output_path.as_deref().unwrap_or(&args.path);
+        self.record_audit("write_pdf", Some(target), result.is_ok());
+        match result {
+            Ok(path) => path,
             Err(error) => format!("ERROR: {error}"),
         }
     }
@@ -1570,6 +1941,198 @@ impl DesktopCommanderMcp {
             stdout_truncated,
             stderr_truncated,
         })
+    }
+
+    fn write_pdf_inner(&self, args: &WritePdfInput) -> Result<String, String> {
+        const MAX_PDF_BYTES: u64 = 20 * 1024 * 1024;
+        const MAX_PDF_PAGES: usize = 300;
+        let markdown = args.content.as_str();
+        let creating = markdown.is_some();
+        let output_path = if creating {
+            args.output_path.as_deref().unwrap_or(&args.path)
+        } else {
+            args.output_path
+                .as_deref()
+                .ok_or("outputPath is required when modifying an existing PDF")?
+        };
+        let output = self.policy.authorize_write_target(Path::new(output_path))?;
+        if !output
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+        {
+            return Err("PDF output path must use the .pdf extension".into());
+        }
+        if output.exists() {
+            return Err("PDF output already exists; choose a new filename".into());
+        }
+
+        let temp = PdfTempDir::new()?;
+        let generated = if let Some(markdown) = markdown {
+            if markdown.len() as u64 > MAX_PDF_BYTES {
+                return Err("Markdown content exceeds the 20 MiB PDF input limit".into());
+            }
+            render_markdown_pdf(markdown, &temp.0, "created")?
+        } else {
+            let source = self.policy.authorize_path(Path::new(&args.path))?;
+            let metadata = fs::metadata(&source)
+                .map_err(|error| format!("Cannot inspect source PDF: {error}"))?;
+            if metadata.len() > MAX_PDF_BYTES {
+                return Err("Source PDF exceeds the 20 MiB input limit".into());
+            }
+            if !source
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+            {
+                return Err("Source file must use the .pdf extension".into());
+            }
+            if source == output {
+                return Err(
+                    "PDF modifications must write to a different file than the source".into(),
+                );
+            }
+            let signature =
+                fs::read(&source).map_err(|error| format!("Cannot read source PDF: {error}"))?;
+            if !signature.starts_with(b"%PDF-") {
+                return Err("Source file does not have a valid PDF signature".into());
+            }
+            let mut pages = split_pdf(&source, &temp.0, "source")?;
+            if pages.is_empty() || pages.len() > MAX_PDF_PAGES {
+                return Err(format!(
+                    "Source PDF must contain between 1 and {MAX_PDF_PAGES} pages"
+                ));
+            }
+            let operations = args
+                .content
+                .as_array()
+                .ok_or("PDF content must be Markdown text or an array of page operations")?;
+            for (operation_index, operation) in operations.iter().enumerate() {
+                let kind = operation
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        format!("PDF operation {} requires a type", operation_index + 1)
+                    })?;
+                match kind {
+                    "delete" => {
+                        let indexes = operation
+                            .get("pageIndexes")
+                            .and_then(serde_json::Value::as_array)
+                            .ok_or("delete operation requires pageIndexes as an array")?;
+                        if indexes.is_empty() {
+                            return Err("delete operation pageIndexes cannot be empty".into());
+                        }
+                        let mut remove = Vec::with_capacity(indexes.len());
+                        for index in indexes {
+                            let index = index
+                                .as_u64()
+                                .and_then(|value| usize::try_from(value).ok())
+                                .ok_or("pageIndexes must contain non-negative integer indexes")?;
+                            if index >= pages.len() {
+                                return Err(format!(
+                                    "Delete page index {index} is outside the current {}-page PDF",
+                                    pages.len()
+                                ));
+                            }
+                            if remove.contains(&index) {
+                                return Err(format!("Delete page index {index} is repeated"));
+                            }
+                            remove.push(index);
+                        }
+                        remove.sort_unstable();
+                        for index in remove.into_iter().rev() {
+                            pages.remove(index);
+                        }
+                        if pages.is_empty() {
+                            return Err("PDF operations cannot remove every page".into());
+                        }
+                    }
+                    "insert" => {
+                        let index = operation
+                            .get("pageIndex")
+                            .and_then(serde_json::Value::as_u64)
+                            .and_then(|value| usize::try_from(value).ok())
+                            .ok_or("insert operation requires a non-negative pageIndex")?;
+                        if index > pages.len() {
+                            return Err(format!(
+                                "Insert page index {index} exceeds the current page count {}",
+                                pages.len()
+                            ));
+                        }
+                        let inserted = if let Some(markdown) = operation
+                            .get("markdown")
+                            .and_then(serde_json::Value::as_str)
+                        {
+                            if markdown.len() as u64 > MAX_PDF_BYTES {
+                                return Err(
+                                    "Inserted Markdown exceeds the 20 MiB input limit".into()
+                                );
+                            }
+                            let inserted_pdf = render_markdown_pdf(
+                                markdown,
+                                &temp.0,
+                                &format!("insert-{operation_index}"),
+                            )?;
+                            split_pdf(
+                                &inserted_pdf,
+                                &temp.0,
+                                &format!("insert-{operation_index}-page"),
+                            )?
+                        } else if let Some(source_pdf) = operation
+                            .get("sourcePdfPath")
+                            .and_then(serde_json::Value::as_str)
+                        {
+                            let source_pdf = self.policy.authorize_path(Path::new(source_pdf))?;
+                            let metadata = fs::metadata(&source_pdf)
+                                .map_err(|error| format!("Cannot inspect inserted PDF: {error}"))?;
+                            if metadata.len() > MAX_PDF_BYTES {
+                                return Err("Inserted PDF exceeds the 20 MiB input limit".into());
+                            }
+                            if !source_pdf
+                                .extension()
+                                .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+                            {
+                                return Err("Inserted source must use the .pdf extension".into());
+                            }
+                            split_pdf(
+                                &source_pdf,
+                                &temp.0,
+                                &format!("insert-{operation_index}-page"),
+                            )?
+                        } else {
+                            return Err(
+                                "insert operation requires markdown or sourcePdfPath".into()
+                            );
+                        };
+                        if inserted.is_empty() {
+                            return Err("Inserted PDF contains no pages".into());
+                        }
+                        pages.splice(index..index, inserted);
+                        if pages.len() > MAX_PDF_PAGES {
+                            return Err(format!(
+                                "PDF operations exceed the {MAX_PDF_PAGES}-page limit"
+                            ));
+                        }
+                    }
+                    _ => return Err(format!("Unsupported PDF operation type: {kind}")),
+                }
+            }
+            let modified = temp.0.join("modified.pdf");
+            merge_pdfs(&pages, &modified)?;
+            modified
+        };
+
+        let metadata = fs::metadata(&generated)
+            .map_err(|error| format!("PDF generation did not produce an output file: {error}"))?;
+        if metadata.len() == 0 || metadata.len() > MAX_PDF_BYTES {
+            return Err("Generated PDF is empty or exceeds the 20 MiB output limit".into());
+        }
+        let bytes =
+            fs::read(&generated).map_err(|error| format!("Cannot read generated PDF: {error}"))?;
+        if !bytes.starts_with(b"%PDF-") {
+            return Err("Generated output does not have a valid PDF signature".into());
+        }
+        write_new_file_without_overwrite(&output, &bytes)?;
+        Ok(format!("PDF written successfully: {}", output.display()))
     }
 
     fn set_config_value_inner(&self, key: &str, value: &serde_json::Value) -> Result<(), String> {

@@ -87,6 +87,7 @@ Each AI application has its own configuration file and may use a different confi
 | kill_process | Original Desktop Commander-compatible name for the same confirmed SIGTERM operation |
 | get_config | Read current folder permissions, command-access state, and server limits |
 | set_config_value | Update approved directories, writable directories, or command execution; requires `confirm=true` and rejects an empty allowed-directory list |
+| write_pdf | Create a PDF from Markdown or insert/delete pages in a PDF; output must be new and in an approved writable folder |
 | get_recent_tool_calls | Read recent MCP activity metadata |
 | get_usage_stats | Aggregate recent MCP tool usage counts |
 
@@ -133,3 +134,8 @@ Hosted ChatGPT cannot launch a local STDIO process on this computer. Testing the
 ## Activity history
 
 Desktop and MCP actions append local audit events to activity.jsonl. Events include timestamp, source, action, target metadata, and outcome. File contents and command arguments are excluded. The log rotates after approximately 1 MiB. The desktop Activity page displays the latest 100 events.
+
+
+### PDF tool requirements
+
+`write_pdf` uses LibreOffice to render Markdown and Poppler's `pdfseparate` / `pdfunite` utilities to edit page order. On Debian-based Linux, install `libreoffice` and `poppler-utils`. It supports Markdown headings, paragraphs, lists, quotes, code blocks, explicit page breaks, and page insert/delete operations. Existing PDFs are never overwritten. Inputs and outputs are limited to 20 MiB and 300 pages; each conversion command has a 45-second timeout. Advanced CSS, image embedding, and full Markdown extensions are not currently implemented.

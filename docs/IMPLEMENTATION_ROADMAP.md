@@ -52,9 +52,13 @@ Status labels distinguish existing foundation from planned work.
 ## Phase 4 — Desktop Commander feature parity
 - [x] Compare the current tool set against the original Desktop Commander MCP feature categories.
 - [x] Keep the product centered on filesystem, terminal, process, configuration, and MCP-client workflows; generic keyboard/mouse automation and screenshot capture are not part of this parity scope.
-- [ ] Audit and implement missing original MCP tools, preserving compatible tool names and behavior where practical.
-- [ ] Verify configuration, search, file editing, and terminal workflows against the original tool behavior.
-- [ ] Keep platform-specific UI inspection separate from the core Desktop Commander feature set.
+- [x] Add original-name MCP aliases for file writing, terminal session operations, and process termination.
+- [x] Add confirmed MCP configuration updates for approved folders, writable folders, and command execution; reject unrestricted empty-folder configuration.
+- [x] Add the `write_pdf` tool for Markdown PDF creation and ordered page insertion/deletion, with source preservation, output permissions, size/page bounds, and command timeouts.
+- [x] Verify compatibility aliases, configuration updates, and PDF creation/page operations through the STDIO integration harness.
+- [ ] Audit and implement the remaining original MCP tools, preserving compatible names and behavior where practical.
+- [ ] Verify remaining configuration, search, file editing, and terminal workflows against the original tool behavior.
+- [x] Keep platform-specific UI inspection separate from the core Desktop Commander feature set.
 
 ## Phase 5 — Packaging and remote access
 - [ ] Validate packaging, update/signing, and install/uninstall behavior.

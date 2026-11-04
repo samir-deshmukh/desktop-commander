@@ -31,7 +31,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - MCP client compatibility testing across individual AI applications; the automated local STDIO integration test passes, but each client still needs its own configuration test.
 - Terminal lifecycle tests in the running desktop app (shell exit, resize, output floods, and additional child-process cases).
 - Process-exit race and stale-PID checks.
-- Remaining original Desktop Commander MCP tools and compatibility checks. Generic keyboard/mouse automation and screenshot capture are outside the intended feature scope. Authenticated ChatGPT connectivity is also not enabled; client availability depends on the client and account.
+- Remaining original Desktop Commander MCP tools and compatibility checks. Configuration updates and basic PDF create/page-edit operations are now implemented. Generic keyboard/mouse automation and screenshot capture are outside the intended feature scope. Authenticated ChatGPT connectivity is also not enabled; client availability depends on the client and account.
 
 ## Product goals
 
