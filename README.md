@@ -24,7 +24,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 ### Still outstanding
 
-- MCP client compatibility testing across individual AI applications; the protocol smoke test passes, but each client still needs its own configuration test.
+- MCP client compatibility testing across individual AI applications; the automated local STDIO integration test passes, but each client still needs its own configuration test.
 - File writes, file creation, and deletion through MCP.
 - Remaining terminal lifecycle tests (shell exit, resize, output floods, and additional child-process cases).
 - Carefully scoped process termination with explicit confirmation; the current process view is read-only.
@@ -60,7 +60,8 @@ Tauri, Rust, React, and TypeScript are in the current implementation. Their depe
 - [Development setup and verification](docs/DEVELOPMENT.md)
 - [Security architecture](docs/SECURITY_ARCHITECTURE.md)
 - [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
-- [Local MCP client setup](docs/local-mcp-clients.md)
+- [Local MCP client setup and protocol test](docs/local-mcp-clients.md)
+- [MCP protocol details and repeatable integration test](docs/MCP_PROTOCOL.md)
 
 ## Development approach
 

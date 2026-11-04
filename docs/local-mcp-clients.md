@@ -65,6 +65,19 @@ Each AI application has its own configuration file and may use a different confi
 - No arbitrary shell or terminal command is exposed.
 - Do not expose this STDIO server through a network wrapper or public tunnel.
 
-## Protocol implementation
+## Protocol implementation and local test
 
-The server uses the official Rust MCP SDK crate rmcp, pinned to version 3.6.0, with the server and STDIO transport features. Protocol initialization, tool discovery, and tool calls have been smoke-tested locally. Individual AI-client compatibility still needs to be verified separately.
+The server uses the official Rust MCP SDK crate rmcp, pinned to version 3.6.0, with the server and STDIO transport features. A repeatable integration test launches the real server binary and checks initialization, tool discovery, default-deny behavior, approval reload, allowed directory listing and text reads, outside-root denial, revocation, and clean shutdown.
+
+Run it from the repository root after building the binary:
+
+~~~bash
+cd app/src-tauri
+CARGO_BUILD_JOBS=1 cargo build --no-default-features --features mcp --bin sam-desktop-mcp --locked
+cd ../..
+python3 scripts/test-mcp-stdio.py
+~~~
+
+The test uses temporary files and an isolated temporary `XDG_DATA_HOME`; it does not touch the user's real approvals. It requires only Python's standard library. Passing this test verifies the server's local protocol behavior, not compatibility with a specific AI application's configuration.
+
+Hosted ChatGPT cannot launch a local STDIO process on this computer. Testing the server from this ChatGPT conversation therefore means running this local protocol harness on the machine; it is not a live hosted ChatGPT-to-local-MCP connection. Remote access remains disabled pending a separate authenticated transport design.

@@ -12,7 +12,8 @@ Status labels distinguish existing foundation from planned work.
 ## Phase 1 — Read-only reliability
 - [x] Review filesystem authorization, canonical containment, direct symlink rejection, bounded text reads, and fail-closed permission reload behavior; continue race-condition review before adding write capabilities.
 - [x] Expand tests for outside-root paths, symlinks, file size bounds, invalid UTF-8, and permission revocation.
-- [ ] Test MCP protocol with target clients individually.
+- [x] Add a repeatable real-subprocess STDIO integration test for initialization, tool discovery, approval/default-deny behavior, allowed reads, outside-root denial, revocation, and shutdown.
+- [ ] Test MCP protocol with target AI clients individually; hosted ChatGPT cannot launch this local STDIO process, so this remains an external-client compatibility item.
 - [x] Document how approval state is persisted and protected, including the same-user limitation.
 
 ## Phase 2 — Controlled file changes
