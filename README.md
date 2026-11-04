@@ -22,7 +22,6 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - Interactive local PTY terminal using the desktop user's configured shell; the selected approved folder is only the initial working directory, not a sandbox.
 - Unit tests for approval persistence, filesystem authorization, bounded reads, and process metadata filtering.
 - Separate `sam-desktop-mcp` STDIO server built with the official Rust `rmcp` SDK.
-- Three read-only MCP tools: `list_approved_folders`, `list_directory`, and `read_text_file`.
 - MCP requests reload the shared permission file, so folder revocation applies to the next request.
 - MCP server binary is built separately from the Tauri desktop app to keep the desktop build lighter.
 
