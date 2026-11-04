@@ -350,6 +350,11 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
             "delete_file",
             "move_file",
             "run_command",
+            "start_terminal",
+            "write_terminal",
+            "read_terminal",
+            "close_terminal",
+            "list_terminal_sessions",
         ],
     })
 }

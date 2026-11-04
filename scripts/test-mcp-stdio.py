@@ -15,6 +15,7 @@ import select
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -128,7 +129,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "run_command"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -236,6 +237,39 @@ def main() -> int:
             )))
             assert command_output["exit_code"] == 0 and canonical in command_output["stdout"]
             passed.append("confirmed command execution in approved working folder")
+
+            terminal_started = response_text(client.request(
+                "tools/call", {"name": "start_terminal", "arguments": {
+                    "cwd": canonical, "cols": 80, "rows": 24, "confirm": True
+                }}
+            ))
+            assert terminal_started.startswith("Terminal started: ")
+            terminal_id = terminal_started.split(": ", 1)[1]
+            sent = response_text(client.request(
+                "tools/call", {"name": "write_terminal", "arguments": {
+                    "session_id": terminal_id, "data": "printf 'MCP_TERMINAL_OK\\n'\n"
+                }}
+            ))
+            assert "sent" in sent.lower()
+            terminal_output = ""
+            for _ in range(30):
+                read_result = json.loads(response_text(client.request(
+                    "tools/call", {"name": "read_terminal", "arguments": {"session_id": terminal_id}}
+                )))
+                terminal_output += read_result["output"]
+                if "MCP_TERMINAL_OK" in terminal_output:
+                    break
+                time.sleep(0.02)
+            assert "MCP_TERMINAL_OK" in terminal_output
+            sessions = json.loads(response_text(client.request(
+                "tools/call", {"name": "list_terminal_sessions", "arguments": {}}
+            )))
+            assert terminal_id in sessions
+            closed = response_text(client.request(
+                "tools/call", {"name": "close_terminal", "arguments": {"session_id": terminal_id}}
+            ))
+            assert "closed" in closed.lower()
+            passed.append("interactive terminal start, input, output, and close")
 
             denied_delete = response_text(client.request(
                 "tools/call", {"name": "delete_file", "arguments": {

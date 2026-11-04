@@ -1,4 +1,5 @@
 use super::{AccessPolicy, read_bounded_text_file};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use rmcp::{
     ServiceExt, handler::server::wrapper::Parameters, schemars, tool, tool_router, transport::stdio,
 };
@@ -8,7 +9,10 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::Arc,
+    sync::{
+        Arc, Mutex,
+        mpsc::{Receiver, SyncSender, TryRecvError, sync_channel},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -107,6 +111,52 @@ struct CommandOutput {
     stderr_truncated: bool,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct StartTerminalInput {
+    /// Approved working directory for the interactive shell.
+    cwd: String,
+    /// Terminal columns (10-300).
+    cols: Option<u16>,
+    /// Terminal rows (2-120).
+    rows: Option<u16>,
+    /// Must be true to confirm opening an interactive shell.
+    confirm: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct TerminalSessionInput {
+    /// Session ID returned by start_terminal.
+    session_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct TerminalWriteInput {
+    /// Session ID returned by start_terminal.
+    session_id: String,
+    /// Input to send to the shell (maximum 16 KiB).
+    data: String,
+}
+
+#[derive(Serialize)]
+struct TerminalReadOutput {
+    output: String,
+    exited: bool,
+}
+
+struct McpTerminalSession {
+    _master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    child: Box<dyn Child + Send + Sync>,
+    receiver: Receiver<String>,
+}
+
+impl Drop for McpTerminalSession {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 #[derive(Serialize)]
 struct FileInfo {
     path: String,
@@ -127,6 +177,24 @@ struct DirectoryEntry {
 #[derive(Clone)]
 struct DesktopCommanderMcp {
     policy: Arc<AccessPolicy>,
+    terminal_sessions: Arc<Mutex<std::collections::HashMap<String, McpTerminalSession>>>,
+}
+
+fn terminal_output_reader(mut reader: Box<dyn std::io::Read + Send>, sender: SyncSender<String>) {
+    let mut buffer = [0u8; 8 * 1024];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(count) => {
+                if sender
+                    .send(String::from_utf8_lossy(&buffer[..count]).into_owned())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }
+    }
 }
 
 fn read_capped_output(mut reader: impl Read) -> Result<(String, bool), String> {
@@ -302,6 +370,60 @@ impl DesktopCommanderMcp {
             Err(error) => format!("ERROR: {error}"),
         }
     }
+
+    #[tool(
+        description = "Start an interactive local shell in an approved working directory. Requires MCP command execution to be enabled in the desktop app and confirm=true. Runs with the desktop user's permissions, is not sandboxed, and is limited to 3 sessions."
+    )]
+    fn start_terminal(&self, Parameters(args): Parameters<StartTerminalInput>) -> String {
+        if !args.confirm {
+            return "ERROR: set confirm=true to start a terminal".into();
+        }
+        match self.start_terminal_inner(&args) {
+            Ok(session_id) => format!("Terminal started: {session_id}"),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Send up to 16 KiB of input to an existing interactive MCP terminal session."
+    )]
+    fn write_terminal(&self, Parameters(args): Parameters<TerminalWriteInput>) -> String {
+        match self.write_terminal_inner(&args.session_id, &args.data) {
+            Ok(()) => "Terminal input sent".into(),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Read available output from an interactive terminal session. Returns at most 64 KiB per call; call again to collect later output."
+    )]
+    fn read_terminal(&self, Parameters(args): Parameters<TerminalSessionInput>) -> String {
+        match self.read_terminal_inner(&args.session_id) {
+            Ok(output) => serde_json::to_string_pretty(&output).unwrap_or_else(|error| {
+                format!("ERROR: cannot serialize terminal output: {error}")
+            }),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(description = "Close an interactive terminal session and terminate its shell.")]
+    fn close_terminal(&self, Parameters(args): Parameters<TerminalSessionInput>) -> String {
+        match self.close_terminal_inner(&args.session_id) {
+            Ok(()) => "Terminal session closed".into(),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(description = "List active interactive terminal session IDs.")]
+    fn list_terminal_sessions(&self) -> String {
+        match self.terminal_sessions.lock() {
+            Ok(sessions) => serde_json::to_string_pretty(&sessions.keys().collect::<Vec<_>>())
+                .unwrap_or_else(|error| {
+                    format!("ERROR: cannot serialize terminal sessions: {error}")
+                }),
+            Err(_) => "ERROR: terminal session state unavailable".into(),
+        }
+    }
 }
 
 impl DesktopCommanderMcp {
@@ -397,6 +519,134 @@ impl DesktopCommanderMcp {
         }
         matches.sort();
         Ok(matches)
+    }
+
+    fn start_terminal_inner(&self, args: &StartTerminalInput) -> Result<String, String> {
+        if !self.policy.command_execution_allowed()? {
+            return Err("MCP command execution is disabled in the desktop app".into());
+        }
+        let cwd = self.authorize_path(&args.cwd)?;
+        if !cwd.is_dir() {
+            return Err("Terminal working directory is not a directory".into());
+        }
+        let pty = native_pty_system();
+        let pair = pty
+            .openpty(PtySize {
+                rows: args.rows.unwrap_or(24).clamp(2, 120),
+                cols: args.cols.unwrap_or(80).clamp(10, 300),
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|error| format!("Cannot create terminal: {error}"))?;
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
+        let mut command = CommandBuilder::new(shell);
+        command.cwd(&cwd);
+        command.env("TERM", "xterm-256color");
+        let child = pair
+            .slave
+            .spawn_command(command)
+            .map_err(|error| format!("Cannot start terminal shell: {error}"))?;
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|error| format!("Cannot read terminal output: {error}"))?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|error| format!("Cannot write terminal input: {error}"))?;
+        let session_id = format!(
+            "mcp-pty-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let (sender, receiver) = sync_channel::<String>(32);
+        let mut sessions = self
+            .terminal_sessions
+            .lock()
+            .map_err(|_| "Terminal session state unavailable")?;
+        if sessions.len() >= 3 {
+            let mut child = child;
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("At most 3 MCP terminal sessions may be active".into());
+        }
+        sessions.insert(
+            session_id.clone(),
+            McpTerminalSession {
+                _master: pair.master,
+                writer,
+                child,
+                receiver,
+            },
+        );
+        drop(sessions);
+        thread::spawn(move || terminal_output_reader(reader, sender));
+        Ok(session_id)
+    }
+
+    fn write_terminal_inner(&self, session_id: &str, data: &str) -> Result<(), String> {
+        if data.len() > 16 * 1024 {
+            return Err("Terminal input chunk exceeds 16 KiB".into());
+        }
+        let mut sessions = self
+            .terminal_sessions
+            .lock()
+            .map_err(|_| "Terminal session state unavailable")?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or("Terminal session not found")?;
+        session
+            .writer
+            .write_all(data.as_bytes())
+            .map_err(|error| format!("Terminal input failed: {error}"))?;
+        session
+            .writer
+            .flush()
+            .map_err(|error| format!("Terminal flush failed: {error}"))
+    }
+
+    fn read_terminal_inner(&self, session_id: &str) -> Result<TerminalReadOutput, String> {
+        const MAX_READ_BYTES: usize = 64 * 1024;
+        let mut sessions = self
+            .terminal_sessions
+            .lock()
+            .map_err(|_| "Terminal session state unavailable")?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or("Terminal session not found")?;
+        let exited = session
+            .child
+            .try_wait()
+            .map_err(|error| format!("Cannot inspect terminal: {error}"))?
+            .is_some();
+        let mut bytes = Vec::with_capacity(MAX_READ_BYTES);
+        while bytes.len() < MAX_READ_BYTES {
+            match session.receiver.try_recv() {
+                Ok(chunk) => {
+                    let remaining = MAX_READ_BYTES - bytes.len();
+                    bytes.extend_from_slice(&chunk.as_bytes()[..chunk.len().min(remaining)]);
+                }
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
+        Ok(TerminalReadOutput {
+            output: String::from_utf8_lossy(&bytes).into_owned(),
+            exited,
+        })
+    }
+
+    fn close_terminal_inner(&self, session_id: &str) -> Result<(), String> {
+        let mut sessions = self
+            .terminal_sessions
+            .lock()
+            .map_err(|_| "Terminal session state unavailable")?;
+        sessions
+            .remove(session_id)
+            .ok_or("Terminal session not found")?;
+        Ok(())
     }
 
     fn run_command_inner(&self, args: &RunCommandInput) -> Result<CommandOutput, String> {
@@ -676,6 +926,7 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let server = DesktopCommanderMcp {
         policy: Arc::new(policy),
+        terminal_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
     }
     .serve(stdio())
     .await?;
@@ -716,6 +967,7 @@ mod tests {
         (
             DesktopCommanderMcp {
                 policy: Arc::new(policy),
+                terminal_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             },
             base,
         )
@@ -854,6 +1106,45 @@ mod tests {
             confirm: false,
         });
         assert!(not_confirmed.is_err());
+
+        let terminal_id = server
+            .start_terminal_inner(&StartTerminalInput {
+                cwd: root.to_string_lossy().into_owned(),
+                cols: Some(80),
+                rows: Some(24),
+                confirm: true,
+            })
+            .unwrap();
+        server
+            .write_terminal_inner(&terminal_id, "printf 'MCP_TERMINAL_OK\\n'\n")
+            .unwrap();
+        let mut terminal_output = String::new();
+        for _ in 0..30 {
+            terminal_output.push_str(&server.read_terminal_inner(&terminal_id).unwrap().output);
+            if terminal_output.contains("MCP_TERMINAL_OK") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            terminal_output.contains("MCP_TERMINAL_OK"),
+            "terminal output was: {terminal_output:?}"
+        );
+        assert!(
+            server
+                .terminal_sessions
+                .lock()
+                .unwrap()
+                .contains_key(&terminal_id)
+        );
+        server.close_terminal_inner(&terminal_id).unwrap();
+        assert!(
+            !server
+                .terminal_sessions
+                .lock()
+                .unwrap()
+                .contains_key(&terminal_id)
+        );
 
         let large_file = root.join("large.txt");
         fs::write(&large_file, vec![b'x'; MAX_PREVIEW_BYTES as usize + 1])

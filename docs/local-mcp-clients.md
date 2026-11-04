@@ -62,6 +62,11 @@ Each AI application has its own configuration file and may use a different confi
 | move_file | Move or rename one regular file inside writable folders |
 | delete_file | Delete one regular file after explicit confirmation |
 | run_command | Run one executable directly in an approved working directory, with bounded output and timeout |
+| start_terminal | Start an interactive local shell session (maximum 3) |
+| write_terminal | Send bounded input to an active terminal session |
+| read_terminal | Read bounded output from an active terminal session |
+| close_terminal | Close a terminal session and terminate its shell |
+| list_terminal_sessions | List active MCP terminal session IDs |
 
 ## Permission boundaries
 
@@ -77,7 +82,9 @@ Each AI application has its own configuration file and may use a different confi
 - Move refuses to overwrite an existing destination.
 - MCP command execution is disabled by default and must be enabled in the desktop app. Each call also requires confirm=true.
 - Commands are launched directly without shell interpretation, with a 30-second timeout and 256 KiB caps for stdout and stderr.
-- Commands run with the desktop user's normal OS permissions; an approved working directory is not a sandbox. The tool does not provide interactive terminal sessions yet.
+- Commands run with the desktop user's normal OS permissions; an approved working directory is not a sandbox.
+- Interactive MCP terminal sessions use a local PTY, require command access to be enabled and confirm=true when starting, and are limited to three concurrent sessions.
+- Terminal input is capped at 16 KiB per call; output is delivered in chunks through a bounded channel. Closing the session kills and reaps its shell.
 - Do not expose this STDIO server through a network wrapper or public tunnel.
 
 ## Protocol implementation and local test

@@ -36,7 +36,8 @@ Status labels distinguish existing foundation from planned work.
 - [x] Add read-only process inspection for processes owned by the current Linux user, with a 500-process cap and no command-line/environment collection.
 - [ ] Design carefully scoped process termination with explicit confirmation and ownership checks.
 - [x] Add opt-in MCP one-shot command execution, disabled by default, with per-call confirmation, direct process invocation (no shell), approved working directory, timeout, and bounded output.
-- [ ] Add interactive MCP terminal sessions with explicit session lifecycle and output backpressure.
+- [x] Add interactive MCP PTY sessions with start/write/read/list/close tools, a three-session cap, bounded input/output, and shell cleanup on close.
+- [ ] Add additional child-process lifecycle tests and process termination controls with explicit confirmation and ownership checks.
 - [ ] Add process termination controls with explicit confirmation and ownership checks; do not rely on command-string blacklists.
 
 ## Phase 4 — Linux desktop automation
