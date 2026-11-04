@@ -53,7 +53,14 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - Local persistence: SQLite, introduced when settings and audit history require it
 - AI tool protocol: MCP, using a maintained official SDK where suitable
 
-These are initial architecture choices, not yet validated dependency versions. Dependency selection and Linux Mint build prerequisites will be checked before implementation.
+Tauri, Rust, React, and TypeScript are in the current implementation. Their dependency versions are recorded in the Cargo and npm lockfiles. Linux Mint 22.x build prerequisites and the tested development toolchain are documented in [Development setup](docs/DEVELOPMENT.md). SQLite remains a future option; it is not currently used.
+
+## Documentation
+
+- [Development setup and verification](docs/DEVELOPMENT.md)
+- [Security architecture](docs/SECURITY_ARCHITECTURE.md)
+- [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
+- [Local MCP client setup](docs/local-mcp-clients.md)
 
 ## Development approach
 

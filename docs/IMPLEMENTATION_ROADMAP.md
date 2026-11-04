@@ -6,8 +6,8 @@ Status labels distinguish existing foundation from planned work.
 - [x] Independent local project exists.
 - [x] Tauri 2 + React + TypeScript shell exists.
 - [x] Local MCP STDIO server foundation and read-only filesystem tools exist.
-- [ ] Confirm remote GitHub repository linkage and publish documentation.
-- [ ] Verify build/test commands from a clean checkout and document exact Linux Mint prerequisites.
+- [x] Confirm remote GitHub repository linkage and publish repository documentation.
+- [ ] Verify build/test commands from a clean checkout; document exact Linux Mint prerequisites and the limitation that a second full Rust build has not been run on the low-memory machine.
 
 ## Phase 1 — Read-only reliability
 - [x] Review filesystem authorization, canonical containment, direct symlink rejection, bounded text reads, and fail-closed permission reload behavior; continue race-condition review before adding write capabilities.
