@@ -53,6 +53,8 @@ Each AI application has its own configuration file and may use a different confi
 | list_approved_folders | Return the saved approved folder roots |
 | list_directory | List one directory inside an approved root |
 | read_text_file | Read a UTF-8 text file up to 1 MiB inside an approved root |
+| search_files | Search file and directory names recursively with depth and result caps |
+| get_file_info | Read basic metadata for an approved file or directory |
 
 ## Permission boundaries
 

@@ -11,11 +11,34 @@ use std::{
 
 const APP_IDENTIFIER: &str = "com.samdeshmukh.desktopcommander";
 const MAX_PREVIEW_BYTES: u64 = 1024 * 1024;
+const MAX_SEARCH_RESULTS: usize = 200;
+const MAX_SEARCH_VISITED: usize = 5_000;
+const MAX_SEARCH_DEPTH: usize = 12;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct PathInput {
     /// Absolute path inside a folder approved in Sam's Desktop Commander.
     path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SearchInput {
+    /// Approved directory in which to search.
+    path: String,
+    /// Case-insensitive substring matched against file and directory names.
+    query: String,
+    /// Maximum matches to return (1-200).
+    max_results: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct FileInfo {
+    path: String,
+    name: String,
+    kind: &'static str,
+    size_bytes: u64,
+    modified_unix_seconds: Option<u64>,
+    readonly: bool,
 }
 
 #[derive(Serialize)]
@@ -72,6 +95,29 @@ impl DesktopCommanderMcp {
             Err(error) => format!("ERROR: {error}"),
         }
     }
+
+    #[tool(
+        description = "Search file and directory names recursively inside an approved folder. Matches a case-insensitive substring; skips symbolic links; bounded to depth 12, 5,000 visited entries, and at most 200 results."
+    )]
+    fn search_files(&self, Parameters(args): Parameters<SearchInput>) -> String {
+        match self.search_files_inner(&args) {
+            Ok(results) => serde_json::to_string_pretty(&results)
+                .unwrap_or_else(|error| format!("ERROR: cannot serialize search results: {error}")),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Get basic metadata for a file or directory inside an approved folder. Does not read file contents or follow symbolic links."
+    )]
+    fn get_file_info(&self, Parameters(args): Parameters<PathInput>) -> String {
+        match self.get_file_info_inner(&args.path) {
+            Ok(info) => serde_json::to_string_pretty(&info).unwrap_or_else(|error| {
+                format!("ERROR: cannot serialize file information: {error}")
+            }),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
 }
 
 impl DesktopCommanderMcp {
@@ -121,6 +167,85 @@ impl DesktopCommanderMcp {
     fn read_text_file_inner(&self, path: &str) -> Result<String, String> {
         let target = self.authorize_path(path)?;
         read_bounded_text_file(&target, MAX_PREVIEW_BYTES)
+    }
+
+    fn search_files_inner(&self, args: &SearchInput) -> Result<Vec<String>, String> {
+        if args.query.trim().is_empty() {
+            return Err("Search query cannot be empty".into());
+        }
+        let root = self.authorize_path(&args.path)?;
+        if !root.is_dir() {
+            return Err("Search path is not a directory".into());
+        }
+        let limit = args.max_results.unwrap_or(100).clamp(1, MAX_SEARCH_RESULTS);
+        let query = args.query.to_lowercase();
+        let mut pending = vec![(root, 0usize)];
+        let mut matches = Vec::new();
+        let mut visited = 0usize;
+
+        while let Some((directory, depth)) = pending.pop() {
+            if depth > MAX_SEARCH_DEPTH || matches.len() >= limit || visited >= MAX_SEARCH_VISITED {
+                break;
+            }
+            let entries = fs::read_dir(&directory)
+                .map_err(|error| format!("Cannot search directory: {error}"))?;
+            for entry in entries {
+                if visited >= MAX_SEARCH_VISITED || matches.len() >= limit {
+                    break;
+                }
+                let entry =
+                    entry.map_err(|error| format!("Cannot inspect search entry: {error}"))?;
+                visited += 1;
+                let path = entry.path();
+                let metadata = fs::symlink_metadata(&path)
+                    .map_err(|error| format!("Cannot inspect search entry: {error}"))?;
+                if metadata.file_type().is_symlink() {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.to_lowercase().contains(&query) {
+                    matches.push(path.to_string_lossy().into_owned());
+                }
+                if metadata.is_dir() && depth < MAX_SEARCH_DEPTH {
+                    pending.push((path, depth + 1));
+                }
+            }
+        }
+        matches.sort();
+        Ok(matches)
+    }
+
+    fn get_file_info_inner(&self, path: &str) -> Result<FileInfo, String> {
+        let target = self.authorize_path(path)?;
+        let metadata = fs::symlink_metadata(&target)
+            .map_err(|error| format!("Cannot inspect file metadata: {error}"))?;
+        if metadata.file_type().is_symlink() {
+            return Err("Access denied: symbolic links cannot be inspected".into());
+        }
+        let kind = if metadata.is_dir() {
+            "directory"
+        } else if metadata.is_file() {
+            "file"
+        } else {
+            "other"
+        };
+        let modified_unix_seconds = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs());
+        Ok(FileInfo {
+            path: target.to_string_lossy().into_owned(),
+            name: target
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            kind,
+            size_bytes: metadata.len(),
+            modified_unix_seconds,
+            readonly: metadata.permissions().readonly(),
+        })
     }
 }
 
@@ -201,6 +326,23 @@ mod tests {
                 .unwrap(),
             "safe test text"
         );
+        let info = server
+            .get_file_info_inner(root.join("note.txt").to_str().expect("file path"))
+            .unwrap();
+        assert_eq!(info.kind, "file");
+        assert_eq!(info.size_bytes, "safe test text".len() as u64);
+        let nested = root.join("nested");
+        fs::create_dir_all(&nested).expect("create nested directory");
+        fs::write(nested.join("target-config.toml"), "test").expect("write nested file");
+        let matches = server
+            .search_files_inner(&SearchInput {
+                path: root.to_string_lossy().into_owned(),
+                query: "config".into(),
+                max_results: Some(10),
+            })
+            .unwrap();
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0].ends_with("target-config.toml"));
         let large_file = root.join("large.txt");
         fs::write(&large_file, vec![b'x'; MAX_PREVIEW_BYTES as usize + 1])
             .expect("write oversized test file");

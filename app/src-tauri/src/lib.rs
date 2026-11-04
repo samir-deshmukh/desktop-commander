@@ -231,7 +231,13 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
         binary_exists: command.is_file(),
         command: command.to_string_lossy().into_owned(),
         transport: "stdio",
-        tools: vec!["list_approved_folders", "list_directory", "read_text_file"],
+        tools: vec![
+            "list_approved_folders",
+            "list_directory",
+            "read_text_file",
+            "search_files",
+            "get_file_info",
+        ],
     })
 }
 
