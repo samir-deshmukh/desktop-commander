@@ -16,7 +16,7 @@ Verified on the development machine:
 - Native X11 libraries including X11 and Xtst are present.
 - The machine has approximately 3.2 GiB RAM. Automation must remain on-demand and avoid continuous screen polling or heavyweight vision pipelines.
 
-The AT-SPI check proves that the accessibility bus and some application trees are reachable. It does not yet prove that the Tauri/WebKit application exposes a useful tree or that accessible actions work reliably.
+The AT-SPI check proves that the accessibility bus is reachable. A live test of the Tauri app found its window, but the WebKit subtree ended at an empty `section` node with no exposed controls. Cinnamon/GNOME `toolkit-accessibility` is currently `false`, and the AT-SPI bus reports `org.a11y.Status.IsEnabled=false`, although `GTK_MODULES=gail:atk-bridge` is present. These disabled accessibility states may explain the empty tree, but the cause has not been isolated. No global accessibility setting was changed.
 
 ## Candidate evaluation
 
@@ -50,7 +50,7 @@ References:
 
 ## Remaining work
 
-- [ ] Confirm whether the Tauri/WebKit view exposes useful AT-SPI nodes and actions.
+- [ ] Re-test the Tauri/WebKit view with AT-SPI explicitly enabled for a controlled test session; verify whether useful nodes and actions appear without permanently changing the desktop accessibility settings.
 - [ ] Build a non-invasive proof-of-concept that lists accessible application/window metadata without sending input.
 - [ ] Review exact crate versions, transitive dependencies, build impact, and licenses before adding dependencies.
 - [ ] Prototype X11 input against a disposable test window, with explicit user-started activation and a Stop control.
