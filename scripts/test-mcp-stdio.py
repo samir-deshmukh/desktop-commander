@@ -129,7 +129,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -176,6 +176,32 @@ def main() -> int:
             ))
             assert contents == "MCP integration test file\n"
             passed.append("approved text-file read")
+
+            ranged = response_text(client.request(
+                "tools/call", {"name": "read_file", "arguments": {
+                    "path": str(sample), "offset": 0, "length": 1
+                }}
+            ))
+            assert "MCP integration test file" in ranged
+            passed.append("line-range file read")
+
+            edit_target = approved / "edit-test.txt"
+            edit_target.write_text("before after before", encoding="utf-8")
+            ambiguous = response_text(client.request(
+                "tools/call", {"name": "edit_block", "arguments": {
+                    "path": str(edit_target), "old_string": "before", "new_string": "changed"
+                }}
+            ))
+            assert "Expected 1 exact match" in ambiguous
+            assert edit_target.read_text(encoding="utf-8") == "before after before"
+            edited = response_text(client.request(
+                "tools/call", {"name": "edit_block", "arguments": {
+                    "path": str(edit_target), "old_string": "before", "new_string": "changed",
+                    "expected_replacements": 2
+                }}
+            ))
+            assert "Replaced 2" in edited and edit_target.read_text(encoding="utf-8") == "changed after changed"
+            passed.append("exact-count atomic block editing")
 
             info = json.loads(response_text(client.request(
                 "tools/call", {"name": "get_file_info", "arguments": {"path": str(sample)}}

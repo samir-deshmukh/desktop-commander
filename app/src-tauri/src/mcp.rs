@@ -34,6 +34,28 @@ struct PathInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ReadFileInput {
+    /// Absolute path to a UTF-8 text file inside an approved folder.
+    path: String,
+    /// Zero-based starting line (default 0).
+    offset: Option<usize>,
+    /// Maximum number of lines to return (1-2000, default 200).
+    length: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct EditBlockInput {
+    /// Absolute file path inside a folder separately approved for changes.
+    path: String,
+    /// Exact existing text to replace.
+    old_string: String,
+    /// Replacement text.
+    new_string: String,
+    /// Expected number of exact matches (default 1).
+    expected_replacements: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SearchInput {
     /// Approved directory in which to search.
     path: String,
@@ -266,6 +288,26 @@ impl DesktopCommanderMcp {
     fn read_text_file(&self, Parameters(args): Parameters<PathInput>) -> String {
         match self.read_text_file_inner(&args.path) {
             Ok(contents) => contents,
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Read a UTF-8 text file by line range. Offset is zero-based; length is capped at 2,000 lines. The file must be inside an approved folder and is limited to 1 MiB."
+    )]
+    fn read_file(&self, Parameters(args): Parameters<ReadFileInput>) -> String {
+        match self.read_file_inner(&args) {
+            Ok(contents) => contents,
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Replace an exact text block in a UTF-8 file inside a separately writable folder. Requires the expected exact match count (default 1); writes atomically and refuses mismatched or ambiguous edits."
+    )]
+    fn edit_block(&self, Parameters(args): Parameters<EditBlockInput>) -> String {
+        match self.edit_block_inner(&args) {
+            Ok(count) => format!("Replaced {count} occurrence(s) successfully"),
             Err(error) => format!("ERROR: {error}"),
         }
     }
@@ -505,6 +547,39 @@ impl DesktopCommanderMcp {
     fn read_text_file_inner(&self, path: &str) -> Result<String, String> {
         let target = self.authorize_path(path)?;
         read_bounded_text_file(&target, MAX_PREVIEW_BYTES)
+    }
+
+    fn read_file_inner(&self, args: &ReadFileInput) -> Result<String, String> {
+        let content = self.read_text_file_inner(&args.path)?;
+        let offset = args.offset.unwrap_or(0);
+        let length = args.length.unwrap_or(200).clamp(1, 2_000);
+        Ok(content
+            .lines()
+            .skip(offset)
+            .take(length)
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+
+    fn edit_block_inner(&self, args: &EditBlockInput) -> Result<usize, String> {
+        if args.old_string.is_empty() {
+            return Err("old_string cannot be empty".into());
+        }
+        let target = self.authorize_path(&args.path)?;
+        let original = read_bounded_text_file(&target, MAX_PREVIEW_BYTES)?;
+        let count = original.matches(&args.old_string).count();
+        let expected = args.expected_replacements.unwrap_or(1);
+        if expected == 0 || expected > 1_000 {
+            return Err("expected_replacements must be between 1 and 1000".into());
+        }
+        if count != expected {
+            return Err(format!(
+                "Expected {expected} exact match(es), found {count}; file was not changed"
+            ));
+        }
+        let updated = original.replace(&args.old_string, &args.new_string);
+        super::write_approved_text_file(&self.policy, &target, &updated, true)?;
+        Ok(count)
     }
 
     fn search_files_inner(&self, args: &SearchInput) -> Result<Vec<String>, String> {
@@ -965,6 +1040,49 @@ mod tests {
                 .unwrap(),
             "safe test text"
         );
+        fs::write(root.join("lines.txt"), "first\nsecond\nthird\n").unwrap();
+        assert_eq!(
+            server
+                .read_file_inner(&ReadFileInput {
+                    path: root.join("lines.txt").to_string_lossy().into_owned(),
+                    offset: Some(1),
+                    length: Some(1),
+                })
+                .unwrap(),
+            "second"
+        );
+        fs::write(root.join("edit.txt"), "alpha beta alpha").unwrap();
+        assert!(
+            server
+                .edit_block_inner(&EditBlockInput {
+                    path: root.join("edit.txt").to_string_lossy().into_owned(),
+                    old_string: "alpha".into(),
+                    new_string: "gamma".into(),
+                    expected_replacements: None,
+                })
+                .is_err(),
+            "ambiguous default edit must be rejected"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("edit.txt")).unwrap(),
+            "alpha beta alpha"
+        );
+        assert_eq!(
+            server
+                .edit_block_inner(&EditBlockInput {
+                    path: root.join("edit.txt").to_string_lossy().into_owned(),
+                    old_string: "alpha".into(),
+                    new_string: "gamma".into(),
+                    expected_replacements: Some(2),
+                })
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("edit.txt")).unwrap(),
+            "gamma beta gamma"
+        );
+
         let info = server
             .get_file_info_inner(root.join("note.txt").to_str().expect("file path"))
             .unwrap();

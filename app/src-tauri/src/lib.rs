@@ -428,6 +428,8 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
             "list_approved_folders",
             "list_directory",
             "read_text_file",
+            "read_file",
+            "edit_block",
             "search_files",
             "get_file_info",
             "read_multiple_files",
