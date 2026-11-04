@@ -61,3 +61,7 @@ nav { display: grid; gap: 5px; }.nav-item { display: flex; align-items: center; 
 .file-editor { display:block; width:100%; min-height:280px; max-height:560px; resize:vertical; margin:0; padding:14px; border:0; outline:none; background:#0d1016; color:#c6ccd6; font:10px/1.65 'DM Mono',monospace; white-space:pre; overflow:auto; }
 .preview-heading button:disabled { opacity:.4; cursor:not-allowed; }
 .preview-heading .danger-action { border-color:#694047; color:#ffb4b4; }
+.activity-panel { display:grid; gap:16px; }
+.activity-panel .process-table-wrap { max-height:560px; }
+.activity-panel .process-table td:nth-child(2) { color:#c6ccd6; }
+.activity-panel .process-table td:nth-child(3) { color:#d8f36a; }

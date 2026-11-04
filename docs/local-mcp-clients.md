@@ -109,3 +109,7 @@ python3 scripts/test-mcp-stdio.py
 The test uses temporary files and an isolated temporary `XDG_DATA_HOME`; it does not touch the user's real approvals. It requires only Python's standard library. Passing this test verifies the server's local protocol behavior, not compatibility with a specific AI application's configuration.
 
 Hosted ChatGPT cannot launch a local STDIO process on this computer. Testing the server from this ChatGPT conversation therefore means running this local protocol harness on the machine; it is not a live hosted ChatGPT-to-local-MCP connection. For a future hosted connection, use OpenAI Secure MCP Tunnel with this STDIO binary; do not add a public listener. The tunnel remains disabled until the account, workspace, and Platform requirements in [ChatGPT remote integration](CHATGPT_INTEGRATION.md) are met.
+
+## Activity history
+
+Desktop and MCP actions append local audit events to activity.jsonl. Events include timestamp, source, action, target metadata, and outcome. File contents and command arguments are excluded. The log rotates after approximately 1 MiB. The desktop Activity page displays the latest 100 events.

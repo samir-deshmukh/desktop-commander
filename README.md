@@ -18,6 +18,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - Opt-in one-shot MCP command execution with per-call confirmation, a 30-second timeout, bounded output, and no shell interpretation.
 - Interactive MCP terminal sessions with explicit start/close, bounded input/output, and a three-session limit.
 - Current-user process inspection and confirmed SIGTERM controls, with the application and MCP processes protected.
+- Local activity history shared by desktop and MCP actions, without storing file contents or command arguments.
 - Interactive local PTY terminal using the desktop user's configured shell; the selected approved folder is only the initial working directory, not a sandbox.
 - Read-only process inspection for processes owned by the current Linux user, capped at 500 entries and excluding command-line arguments and environment variables.
 - Unit tests for approval persistence, filesystem authorization, bounded reads, and process metadata filtering.

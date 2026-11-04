@@ -207,6 +207,7 @@ struct DirectoryEntry {
 #[derive(Clone)]
 struct DesktopCommanderMcp {
     policy: Arc<AccessPolicy>,
+    audit_file: PathBuf,
     terminal_sessions: Arc<Mutex<std::collections::HashMap<String, McpTerminalSession>>>,
 }
 
@@ -274,7 +275,9 @@ impl DesktopCommanderMcp {
         description = "List the immediate files and folders at an absolute path. The path must be inside an approved folder. Symbolic links are not followed."
     )]
     fn list_directory(&self, Parameters(args): Parameters<PathInput>) -> String {
-        match self.list_directory_inner(&args.path) {
+        let result = self.list_directory_inner(&args.path);
+        self.record_audit("list_directory", Some(&args.path), result.is_ok());
+        match result {
             Ok(entries) => serde_json::to_string_pretty(&entries).unwrap_or_else(|error| {
                 format!("ERROR: cannot serialize directory listing: {error}")
             }),
@@ -286,7 +289,9 @@ impl DesktopCommanderMcp {
         description = "Read a UTF-8 text file inside an approved folder. Maximum file size is 1 MiB. Symbolic links and files outside approved folders are rejected."
     )]
     fn read_text_file(&self, Parameters(args): Parameters<PathInput>) -> String {
-        match self.read_text_file_inner(&args.path) {
+        let result = self.read_text_file_inner(&args.path);
+        self.record_audit("read_text_file", Some(&args.path), result.is_ok());
+        match result {
             Ok(contents) => contents,
             Err(error) => format!("ERROR: {error}"),
         }
@@ -296,7 +301,9 @@ impl DesktopCommanderMcp {
         description = "Read a UTF-8 text file by line range. Offset is zero-based; length is capped at 2,000 lines. The file must be inside an approved folder and is limited to 1 MiB."
     )]
     fn read_file(&self, Parameters(args): Parameters<ReadFileInput>) -> String {
-        match self.read_file_inner(&args) {
+        let result = self.read_file_inner(&args);
+        self.record_audit("read_file", Some(&args.path), result.is_ok());
+        match result {
             Ok(contents) => contents,
             Err(error) => format!("ERROR: {error}"),
         }
@@ -306,7 +313,9 @@ impl DesktopCommanderMcp {
         description = "Replace an exact text block in a UTF-8 file inside a separately writable folder. Requires the expected exact match count (default 1); writes atomically and refuses mismatched or ambiguous edits."
     )]
     fn edit_block(&self, Parameters(args): Parameters<EditBlockInput>) -> String {
-        match self.edit_block_inner(&args) {
+        let result = self.edit_block_inner(&args);
+        self.record_audit("edit_block", Some(&args.path), result.is_ok());
+        match result {
             Ok(count) => format!("Replaced {count} occurrence(s) successfully"),
             Err(error) => format!("ERROR: {error}"),
         }
@@ -316,7 +325,9 @@ impl DesktopCommanderMcp {
         description = "Search file and directory names recursively inside an approved folder. Matches a case-insensitive substring; skips symbolic links; bounded to depth 12, 5,000 visited entries, and at most 200 results."
     )]
     fn search_files(&self, Parameters(args): Parameters<SearchInput>) -> String {
-        match self.search_files_inner(&args) {
+        let result = self.search_files_inner(&args);
+        self.record_audit("search_files", Some(&args.path), result.is_ok());
+        match result {
             Ok(results) => serde_json::to_string_pretty(&results)
                 .unwrap_or_else(|error| format!("ERROR: cannot serialize search results: {error}")),
             Err(error) => format!("ERROR: {error}"),
@@ -350,7 +361,9 @@ impl DesktopCommanderMcp {
         description = "Search UTF-8 file contents recursively inside an approved folder. Skips symbolic links and files larger than 256 KiB; bounded to 1,000 files inspected and 100 matching files."
     )]
     fn search_content(&self, Parameters(args): Parameters<ContentSearchInput>) -> String {
-        match self.search_content_inner(&args) {
+        let result = self.search_content_inner(&args);
+        self.record_audit("search_content", Some(&args.path), result.is_ok());
+        match result {
             Ok(matches) => serde_json::to_string_pretty(&matches).unwrap_or_else(|error| {
                 format!("ERROR: cannot serialize content search results: {error}")
             }),
@@ -362,7 +375,9 @@ impl DesktopCommanderMcp {
         description = "Write UTF-8 text to a file in a folder explicitly enabled for changes. Maximum 1 MiB. Replacing an existing file requires overwrite=true; writes use a temporary sibling file and atomic rename."
     )]
     fn write_text_file(&self, Parameters(args): Parameters<WriteFileInput>) -> String {
-        match self.write_text_file_inner(&args) {
+        let result = self.write_text_file_inner(&args);
+        self.record_audit("write_text_file", Some(&args.path), result.is_ok());
+        match result {
             Ok(()) => "File written successfully".into(),
             Err(error) => format!("ERROR: {error}"),
         }
@@ -375,7 +390,9 @@ impl DesktopCommanderMcp {
         if !args.confirm {
             return "ERROR: set confirm=true to create this directory".into();
         }
-        match self.create_directory_inner(&args.path) {
+        let result = self.create_directory_inner(&args.path);
+        self.record_audit("create_directory", Some(&args.path), result.is_ok());
+        match result {
             Ok(()) => "Directory created successfully".into(),
             Err(error) => format!("ERROR: {error}"),
         }
@@ -388,7 +405,9 @@ impl DesktopCommanderMcp {
         if !args.confirm {
             return "ERROR: set confirm=true to delete this file".into();
         }
-        match self.delete_file_inner(&args.path) {
+        let result = self.delete_file_inner(&args.path);
+        self.record_audit("delete_file", Some(&args.path), result.is_ok());
+        match result {
             Ok(()) => "File deleted successfully".into(),
             Err(error) => format!("ERROR: {error}"),
         }
@@ -401,7 +420,9 @@ impl DesktopCommanderMcp {
         if !args.confirm {
             return "ERROR: set confirm=true to move this file".into();
         }
-        match self.move_file_inner(&args.source, &args.destination) {
+        let result = self.move_file_inner(&args.source, &args.destination);
+        self.record_audit("move_file", Some(&args.source), result.is_ok());
+        match result {
             Ok(()) => "File moved successfully".into(),
             Err(error) => format!("ERROR: {error}"),
         }
@@ -414,7 +435,9 @@ impl DesktopCommanderMcp {
         if !args.confirm {
             return "ERROR: set confirm=true to run this command".into();
         }
-        match self.run_command_inner(&args) {
+        let result = self.run_command_inner(&args);
+        self.record_audit("run_command", Some(&args.program), result.is_ok());
+        match result {
             Ok(output) => serde_json::to_string_pretty(&output)
                 .unwrap_or_else(|error| format!("ERROR: cannot serialize command output: {error}")),
             Err(error) => format!("ERROR: {error}"),
@@ -428,7 +451,9 @@ impl DesktopCommanderMcp {
         if !args.confirm {
             return "ERROR: set confirm=true to start a terminal".into();
         }
-        match self.start_terminal_inner(&args) {
+        let result = self.start_terminal_inner(&args);
+        self.record_audit("start_terminal", Some(&args.cwd), result.is_ok());
+        match result {
             Ok(session_id) => format!("Terminal started: {session_id}"),
             Err(error) => format!("ERROR: {error}"),
         }
@@ -458,7 +483,9 @@ impl DesktopCommanderMcp {
 
     #[tool(description = "Close an interactive terminal session and terminate its shell.")]
     fn close_terminal(&self, Parameters(args): Parameters<TerminalSessionInput>) -> String {
-        match self.close_terminal_inner(&args.session_id) {
+        let result = self.close_terminal_inner(&args.session_id);
+        self.record_audit("close_terminal", Some(&args.session_id), result.is_ok());
+        match result {
             Ok(()) => "Terminal session closed".into(),
             Err(error) => format!("ERROR: {error}"),
         }
@@ -493,7 +520,10 @@ impl DesktopCommanderMcp {
         if !args.confirm {
             return "ERROR: set confirm=true to terminate this process".into();
         }
-        match super::processes::terminate_current_user_process(args.pid) {
+        let result = super::processes::terminate_current_user_process(args.pid);
+        let target = args.pid.to_string();
+        self.record_audit("terminate_process", Some(&target), result.is_ok());
+        match result {
             Ok(()) => format!("SIGTERM sent to process {}", args.pid),
             Err(error) => format!("ERROR: {error}"),
         }
@@ -501,6 +531,20 @@ impl DesktopCommanderMcp {
 }
 
 impl DesktopCommanderMcp {
+    fn record_audit(&self, action: &str, target: Option<&str>, success: bool) {
+        let _ = super::audit::append_event(
+            &self.audit_file,
+            "MCP",
+            action,
+            target,
+            if success {
+                "success"
+            } else {
+                "denied_or_failed"
+            },
+        );
+    }
+
     fn authorize_path(&self, path: &str) -> Result<PathBuf, String> {
         self.policy.refresh()?;
         self.policy.authorize_path(Path::new(path))
@@ -976,8 +1020,10 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
     let policy_path = data_dir.join("approved_folders.json");
     let policy = AccessPolicy::load(policy_path).map_err(std::io::Error::other)?;
 
+    let audit_file = policy.audit_path();
     let server = DesktopCommanderMcp {
         policy: Arc::new(policy),
+        audit_file,
         terminal_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
     }
     .serve(stdio())
@@ -1016,13 +1062,13 @@ mod tests {
         )
         .expect("write test approvals");
         let policy = AccessPolicy::load(storage_file).expect("load test policy");
-        (
-            DesktopCommanderMcp {
-                policy: Arc::new(policy),
-                terminal_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
-            },
-            base,
-        )
+        let audit_file = policy.audit_path();
+        let server = DesktopCommanderMcp {
+            policy: Arc::new(policy),
+            audit_file,
+            terminal_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        };
+        (server, base)
     }
 
     #[test]

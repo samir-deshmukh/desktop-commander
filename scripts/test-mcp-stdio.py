@@ -375,6 +375,14 @@ def main() -> int:
         finally:
             code, trailing_stdout, stderr = client.close()
 
+        activity_file = policy_dir / "activity.jsonl"
+        assert activity_file.is_file(), "MCP actions should create the local activity log"
+        events = [json.loads(line) for line in activity_file.read_text(encoding="utf-8").splitlines()]
+        actions = {event["action"] for event in events}
+        assert {"read_text_file", "write_text_file", "run_command", "start_terminal", "terminate_process"}.issubset(actions)
+        assert all("content" not in event and "args" not in event for event in events)
+        passed.append("local audit log records actions without file contents or command arguments")
+
         if code != 0:
             raise AssertionError(f"MCP server exited with status {code}; stderr={stderr!r}")
         if trailing_stdout.strip():

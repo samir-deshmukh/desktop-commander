@@ -12,6 +12,7 @@ type Entry = { name: string; path: string; is_dir: boolean };
 type McpInfo = { command: string; binary_exists: boolean; transport: string; tools: string[] };
 type ProcessInfo = { pid: number; parent_pid: number; name: string; state: string; resident_memory_bytes: number | null };
 type ProcessSnapshot = { processes: ProcessInfo[]; truncated: boolean };
+type AuditEvent = { timestamp_unix_seconds: number; source: string; action: string; target: string | null; outcome: string };
 
 function formatMemory(bytes: number | null) {
   if (bytes === null) return '—';
@@ -90,6 +91,8 @@ function App() {
   const [commandExecutionEnabled, setCommandExecutionEnabled] = useState(false);
   const [processSnapshot, setProcessSnapshot] = useState<ProcessSnapshot | null>(null);
   const [processBusy, setProcessBusy] = useState(false);
+  const [activity, setActivity] = useState<AuditEvent[]>([]);
+  const [activityBusy, setActivityBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +110,13 @@ function App() {
     try { setProcessSnapshot(await invoke<ProcessSnapshot>('list_processes')); }
     catch (e) { setError(String(e)); }
     finally { setProcessBusy(false); }
+  }, []);
+  const refreshActivity = useCallback(async () => {
+    setActivityBusy(true);
+    setError('');
+    try { setActivity(await invoke<AuditEvent[]>('recent_activity', { limit: 100 })); }
+    catch (e) { setError(String(e)); }
+    finally { setActivityBusy(false); }
   }, []);
   const terminateProcess = async (pid: number, name: string) => {
     if (!window.confirm('Send SIGTERM to ' + name + ' (PID ' + pid + ')? Unsaved work in that process may be lost.')) return;
@@ -258,7 +268,7 @@ function App() {
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">S</div><div><strong>Sam's Desktop</strong><span>COMMANDER</span></div></div>
         <div className="nav-label">WORKSPACE</div>
-        <nav aria-label="Main navigation">{sections.map((section) => <button key={section.label} className={`nav-item ${active === section.label ? 'selected' : ''}`} onClick={() => { setActive(section.label); if (section.label === 'Processes') void refreshProcesses(); }}><span className="nav-icon">{section.icon}</span>{section.label}</button>)}</nav>
+        <nav aria-label="Main navigation">{sections.map((section) => <button key={section.label} className={`nav-item ${active === section.label ? 'selected' : ''}`} onClick={() => { setActive(section.label); if (section.label === 'Processes') void refreshProcesses(); if (section.label === 'Activity') void refreshActivity(); }}><span className="nav-icon">{section.icon}</span>{section.label}</button>)}</nav>
         <div className="sidebar-bottom"><span className="status-dot" /> Local machine <span className="version">v0.1.0</span></div>
       </aside>
       <main className="main-area">
@@ -283,6 +293,11 @@ function App() {
             {processSnapshot && <><div className="process-summary"><span>{processSnapshot.processes.length} processes shown</span><span>Current user only · No controls to stop processes</span></div><div className="process-table-wrap"><table className="process-table"><thead><tr><th>PID</th><th>Process</th><th>Parent</th><th>State</th><th>Memory</th><th>Action</th></tr></thead><tbody>{processSnapshot.processes.map((process) => <tr key={process.pid}><td>{process.pid}</td><td>{process.name}</td><td>{process.parent_pid}</td><td>{process.state}</td><td>{formatMemory(process.resident_memory_bytes)}</td><td><button className="process-stop" disabled={process.pid === 1 || process.name === 'app' || process.name.startsWith('sam-desktop')} onClick={() => void terminateProcess(process.pid, process.name)}>Stop</button></td></tr>)}</tbody></table></div>{processSnapshot.truncated && <p className="hint-copy">The list is capped at 500 processes. Some entries are not shown.</p>}</>}
             {!processSnapshot && !error && <p className="muted-copy">{processBusy ? 'Reading process information…' : 'No process information loaded.'}</p>}
             <p className="hint-copy">This feature reads Linux process metadata from /proc. It does not read command-line arguments, environment variables, or file contents. Stop sends SIGTERM only to current-user processes; the application and MCP processes are protected.</p>
+          </div> : active === 'Activity' ? <div className="workspace-panel activity-panel">
+            <div className="workspace-toolbar"><div><h2>Recent activity</h2><p>Local audit history for desktop and MCP actions. File contents and command arguments are not recorded.</p></div><button className="primary-button" disabled={activityBusy} onClick={() => void refreshActivity()}>{activityBusy ? 'Refreshing…' : 'Refresh'}</button></div>
+            {error && <p className="error-message" role="alert">{error}</p>}
+            {activity.length === 0 ? <p className="muted-copy">{activityBusy ? 'Loading activity…' : 'No activity recorded yet.'}</p> : <div className="process-table-wrap"><table className="process-table"><thead><tr><th>Time</th><th>Source</th><th>Action</th><th>Target</th><th>Outcome</th></tr></thead><tbody>{activity.map((event, index) => <tr key={index}><td>{new Date(event.timestamp_unix_seconds * 1000).toLocaleString()}</td><td>{event.source}</td><td>{event.action}</td><td>{event.target ?? '—'}</td><td>{event.outcome}</td></tr>)}</tbody></table></div>}
+            <p className="hint-copy">The log is stored locally in the application's data directory and rotates after reaching approximately 1 MiB. It records action metadata, not file contents or command arguments.</p>
           </div> : active === 'MCP server' ? <div className="workspace-panel mcp-panel">
             <div className="workspace-toolbar"><div><h2>Local MCP server</h2><p>Compatible AI clients launch this local process over standard input/output. No network port is opened.</p></div><span className="terminal-safety">STDIO · LOCAL</span></div>
             {error && <p className="error-message" role="alert">{error}</p>}

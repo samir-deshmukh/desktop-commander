@@ -12,6 +12,8 @@ use std::{
 #[cfg(feature = "desktop")]
 use tauri::{Emitter, Manager, State};
 
+#[cfg(any(feature = "desktop", feature = "mcp"))]
+mod audit;
 #[cfg(feature = "mcp")]
 mod mcp;
 #[cfg(any(feature = "desktop", feature = "mcp"))]
@@ -169,6 +171,13 @@ impl AccessPolicy {
             .map_err(|_| "Permission state unavailable".into())
     }
 
+    fn audit_path(&self) -> PathBuf {
+        self.storage_file
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("activity.jsonl")
+    }
+
     fn authorize_path(&self, path: &Path) -> Result<PathBuf, String> {
         let metadata =
             fs::symlink_metadata(path).map_err(|error| format!("Cannot inspect path: {error}"))?;
@@ -272,6 +281,26 @@ impl AccessPolicy {
         fs::rename(&temporary, &self.storage_file)
             .map_err(|e| format!("Cannot finalize saved permissions: {e}"))
     }
+}
+
+#[cfg(feature = "desktop")]
+fn record_desktop_activity(
+    policy: &AccessPolicy,
+    action: &str,
+    target: Option<&str>,
+    success: bool,
+) {
+    let _ = audit::append_event(
+        &policy.audit_path(),
+        "Desktop",
+        action,
+        target,
+        if success {
+            "success"
+        } else {
+            "denied_or_failed"
+        },
+    );
 }
 
 const MAX_MUTATION_BYTES: usize = 1024 * 1024;
@@ -452,17 +481,33 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
+fn recent_activity(
+    limit: Option<usize>,
+    policy: State<'_, AccessPolicy>,
+) -> Result<Vec<audit::AuditEvent>, String> {
+    audit::read_recent(&policy.audit_path(), limit.unwrap_or(100))
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
 fn list_processes() -> Result<processes::ProcessSnapshot, String> {
     processes::list_current_user_processes()
 }
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-fn terminate_process(pid: u32, confirm: bool) -> Result<(), String> {
+fn terminate_process(
+    pid: u32,
+    confirm: bool,
+    policy: State<'_, AccessPolicy>,
+) -> Result<(), String> {
     if !confirm {
         return Err("Set confirm=true to terminate this process".into());
     }
-    processes::terminate_current_user_process(pid)
+    let result = processes::terminate_current_user_process(pid);
+    let target = pid.to_string();
+    record_desktop_activity(&policy, "terminate_process", Some(&target), result.is_ok());
+    result
 }
 
 #[cfg(feature = "desktop")]
@@ -523,6 +568,16 @@ fn set_folder_write_access(
         .map_err(|_| "Permission state unavailable")?;
     policy.persist_with(&roots, &updated, command_enabled)?;
     *writable = updated.clone();
+    record_desktop_activity(
+        &policy,
+        if enabled {
+            "enable_folder_writes"
+        } else {
+            "disable_folder_writes"
+        },
+        Some(&path),
+        true,
+    );
     Ok(updated
         .iter()
         .map(|root| root.to_string_lossy().into_owned())
@@ -559,6 +614,16 @@ fn set_command_execution_enabled(
         .map_err(|_| "Permission state unavailable")?;
     policy.persist_with(&roots, &writable, enabled)?;
     *current = enabled;
+    record_desktop_activity(
+        &policy,
+        if enabled {
+            "enable_command_execution"
+        } else {
+            "disable_command_execution"
+        },
+        None,
+        true,
+    );
     Ok(enabled)
 }
 
@@ -634,13 +699,17 @@ fn write_text_file(
     overwrite: bool,
     policy: State<'_, AccessPolicy>,
 ) -> Result<(), String> {
-    write_approved_text_file(&policy, Path::new(&path), &content, overwrite)
+    let result = write_approved_text_file(&policy, Path::new(&path), &content, overwrite);
+    record_desktop_activity(&policy, "write_text_file", Some(&path), result.is_ok());
+    result
 }
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
 fn create_directory(path: String, policy: State<'_, AccessPolicy>) -> Result<(), String> {
-    create_approved_directory(&policy, Path::new(&path))
+    let result = create_approved_directory(&policy, Path::new(&path));
+    record_desktop_activity(&policy, "create_directory", Some(&path), result.is_ok());
+    result
 }
 
 #[cfg(feature = "desktop")]
@@ -649,7 +718,9 @@ fn delete_file(path: String, confirm: bool, policy: State<'_, AccessPolicy>) -> 
     if !confirm {
         return Err("Set confirm=true to delete this file".into());
     }
-    delete_approved_file(&policy, Path::new(&path))
+    let result = delete_approved_file(&policy, Path::new(&path));
+    record_desktop_activity(&policy, "delete_file", Some(&path), result.is_ok());
+    result
 }
 
 #[cfg(feature = "desktop")]
@@ -663,7 +734,9 @@ fn move_file(
     if !confirm {
         return Err("Set confirm=true to move this file".into());
     }
-    move_approved_file(&policy, Path::new(&source), Path::new(&destination))
+    let result = move_approved_file(&policy, Path::new(&source), Path::new(&destination));
+    record_desktop_activity(&policy, "move_file", Some(&source), result.is_ok());
+    result
 }
 
 #[cfg(feature = "desktop")]
@@ -1006,6 +1079,7 @@ pub fn run() {
             mcp_server_info,
             list_processes,
             terminate_process,
+            recent_activity,
             approved_folders,
             writable_folders,
             set_folder_write_access,
