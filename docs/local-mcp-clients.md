@@ -55,6 +55,8 @@ Each AI application has its own configuration file and may use a different confi
 | read_text_file | Read a UTF-8 text file up to 1 MiB inside an approved root |
 | search_files | Search file and directory names recursively with depth and result caps |
 | get_file_info | Read basic metadata for an approved file or directory |
+| read_multiple_files | Read up to 10 approved UTF-8 files with a combined 4 MiB cap |
+| search_content | Search bounded UTF-8 file contents recursively inside an approved folder |
 
 ## Permission boundaries
 

@@ -128,7 +128,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "search_files", "get_file_info"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "search_files", "get_file_info", "read_multiple_files", "search_content"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -181,6 +181,20 @@ def main() -> int:
             )))
             assert any(path.endswith("hello.txt") for path in search)
             passed.append("bounded recursive filename search")
+
+            multiple = json.loads(response_text(client.request(
+                "tools/call", {"name": "read_multiple_files", "arguments": {"paths": [str(sample)]}}
+            )))
+            assert len(multiple) == 1 and "MCP integration test file" in multiple[0][1]
+            passed.append("multi-file read")
+
+            content_search = json.loads(response_text(client.request(
+                "tools/call", {"name": "search_content", "arguments": {
+                    "path": canonical, "query": "integration test", "max_results": 10
+                }}
+            )))
+            assert any(path.endswith("hello.txt") for path in content_search)
+            passed.append("bounded file-content search")
 
             denied = response_text(client.request(
                 "tools/call", {"name": "read_text_file", "arguments": {"path": str(outside)}}

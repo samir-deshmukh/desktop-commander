@@ -237,6 +237,8 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
             "read_text_file",
             "search_files",
             "get_file_info",
+            "read_multiple_files",
+            "search_content",
         ],
     })
 }

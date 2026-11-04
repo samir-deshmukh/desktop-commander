@@ -14,6 +14,10 @@ const MAX_PREVIEW_BYTES: u64 = 1024 * 1024;
 const MAX_SEARCH_RESULTS: usize = 200;
 const MAX_SEARCH_VISITED: usize = 5_000;
 const MAX_SEARCH_DEPTH: usize = 12;
+const MAX_MULTI_READ_FILES: usize = 10;
+const MAX_MULTI_READ_BYTES: usize = 4 * 1024 * 1024;
+const MAX_CONTENT_SEARCH_FILES: usize = 1_000;
+const MAX_CONTENT_SEARCH_FILE_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct PathInput {
@@ -28,6 +32,22 @@ struct SearchInput {
     /// Case-insensitive substring matched against file and directory names.
     query: String,
     /// Maximum matches to return (1-200).
+    max_results: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct MultiplePathsInput {
+    /// Absolute paths of files inside approved folders (maximum 10).
+    paths: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ContentSearchInput {
+    /// Approved directory in which to search.
+    path: String,
+    /// Case-insensitive text to find in UTF-8 files.
+    query: String,
+    /// Maximum matching files to return (1-100).
     max_results: Option<usize>,
 }
 
@@ -114,6 +134,29 @@ impl DesktopCommanderMcp {
         match self.get_file_info_inner(&args.path) {
             Ok(info) => serde_json::to_string_pretty(&info).unwrap_or_else(|error| {
                 format!("ERROR: cannot serialize file information: {error}")
+            }),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Read up to 10 UTF-8 text files from approved folders, with a combined 4 MiB output limit and the standard 1 MiB per-file limit. Each path is authorized independently."
+    )]
+    fn read_multiple_files(&self, Parameters(args): Parameters<MultiplePathsInput>) -> String {
+        match self.read_multiple_files_inner(&args.paths) {
+            Ok(contents) => serde_json::to_string_pretty(&contents)
+                .unwrap_or_else(|error| format!("ERROR: cannot serialize file contents: {error}")),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Search UTF-8 file contents recursively inside an approved folder. Skips symbolic links and files larger than 256 KiB; bounded to 1,000 files inspected and 100 matching files."
+    )]
+    fn search_content(&self, Parameters(args): Parameters<ContentSearchInput>) -> String {
+        match self.search_content_inner(&args) {
+            Ok(matches) => serde_json::to_string_pretty(&matches).unwrap_or_else(|error| {
+                format!("ERROR: cannot serialize content search results: {error}")
             }),
             Err(error) => format!("ERROR: {error}"),
         }
@@ -208,6 +251,88 @@ impl DesktopCommanderMcp {
                 }
                 if metadata.is_dir() && depth < MAX_SEARCH_DEPTH {
                     pending.push((path, depth + 1));
+                }
+            }
+        }
+        matches.sort();
+        Ok(matches)
+    }
+
+    fn read_multiple_files_inner(&self, paths: &[String]) -> Result<Vec<(String, String)>, String> {
+        if paths.is_empty() || paths.len() > MAX_MULTI_READ_FILES {
+            return Err(format!(
+                "Provide between 1 and {MAX_MULTI_READ_FILES} file paths"
+            ));
+        }
+        let mut total_bytes = 0usize;
+        let mut output = Vec::with_capacity(paths.len());
+        for path in paths {
+            let target = self.authorize_path(path)?;
+            let content = read_bounded_text_file(&target, MAX_PREVIEW_BYTES)?;
+            total_bytes = total_bytes.saturating_add(content.len());
+            if total_bytes > MAX_MULTI_READ_BYTES {
+                return Err(format!(
+                    "Combined file content exceeds the {MAX_MULTI_READ_BYTES}-byte limit"
+                ));
+            }
+            output.push((target.to_string_lossy().into_owned(), content));
+        }
+        Ok(output)
+    }
+
+    fn search_content_inner(&self, args: &ContentSearchInput) -> Result<Vec<String>, String> {
+        if args.query.trim().is_empty() {
+            return Err("Search query cannot be empty".into());
+        }
+        let root = self.authorize_path(&args.path)?;
+        if !root.is_dir() {
+            return Err("Search path is not a directory".into());
+        }
+        let limit = args.max_results.unwrap_or(50).clamp(1, 100);
+        let query = args.query.to_lowercase();
+        let mut pending = vec![(root, 0usize)];
+        let mut matches = Vec::new();
+        let mut inspected = 0usize;
+        while let Some((directory, depth)) = pending.pop() {
+            if depth > MAX_SEARCH_DEPTH
+                || matches.len() >= limit
+                || inspected >= MAX_CONTENT_SEARCH_FILES
+            {
+                break;
+            }
+            for entry in fs::read_dir(&directory)
+                .map_err(|error| format!("Cannot search directory: {error}"))?
+            {
+                if inspected >= MAX_CONTENT_SEARCH_FILES || matches.len() >= limit {
+                    break;
+                }
+                let entry =
+                    entry.map_err(|error| format!("Cannot inspect search entry: {error}"))?;
+                let path = entry.path();
+                let metadata = fs::symlink_metadata(&path)
+                    .map_err(|error| format!("Cannot inspect search entry: {error}"))?;
+                if metadata.file_type().is_symlink() {
+                    continue;
+                }
+                if metadata.is_dir() {
+                    if depth < MAX_SEARCH_DEPTH {
+                        pending.push((path, depth + 1));
+                    }
+                    continue;
+                }
+                if !metadata.is_file() || metadata.len() > MAX_CONTENT_SEARCH_FILE_BYTES {
+                    continue;
+                }
+                inspected += 1;
+                let Ok(authorized) = self.authorize_path(path.to_string_lossy().as_ref()) else {
+                    continue;
+                };
+                if let Ok(contents) =
+                    read_bounded_text_file(&authorized, MAX_CONTENT_SEARCH_FILE_BYTES)
+                {
+                    if contents.to_lowercase().contains(&query) {
+                        matches.push(authorized.to_string_lossy().into_owned());
+                    }
                 }
             }
         }
@@ -343,6 +468,28 @@ mod tests {
             .unwrap();
         assert_eq!(matches.len(), 1);
         assert!(matches[0].ends_with("target-config.toml"));
+        let multiple = server
+            .read_multiple_files_inner(&[
+                root.join("note.txt").to_string_lossy().into_owned(),
+                nested
+                    .join("target-config.toml")
+                    .to_string_lossy()
+                    .into_owned(),
+            ])
+            .unwrap();
+        assert_eq!(multiple.len(), 2);
+        let content_matches = server
+            .search_content_inner(&ContentSearchInput {
+                path: root.to_string_lossy().into_owned(),
+                query: "safe test".into(),
+                max_results: Some(10),
+            })
+            .unwrap();
+        assert!(
+            content_matches
+                .iter()
+                .any(|path| path.ends_with("note.txt"))
+        );
         let large_file = root.join("large.txt");
         fs::write(&large_file, vec![b'x'; MAX_PREVIEW_BYTES as usize + 1])
             .expect("write oversized test file");
