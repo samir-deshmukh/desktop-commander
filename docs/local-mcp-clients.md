@@ -50,6 +50,7 @@ Each AI application has its own configuration file and may use a different confi
 
 | Tool | Purpose |
 |---|---|
+| get_ai_workflow_guide | Return guidance for AI clients to inspect, act, verify, and report without bypassing local permissions |
 | list_approved_folders | Return the saved approved folder roots |
 | list_directory | List one directory inside an approved root |
 | read_text_file | Read a UTF-8 text file up to 1 MiB inside an approved root |
