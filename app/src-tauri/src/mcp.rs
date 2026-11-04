@@ -1048,6 +1048,77 @@ impl DesktopCommanderMcp {
             Err(error) => format!("ERROR: {error}"),
         }
     }
+
+    // Compatibility aliases keep the established Desktop Commander tool names
+    // available while reusing the same local permission and session policies.
+    #[tool(
+        description = "Write or replace a UTF-8 text file in a separately writable approved folder. Existing files require overwrite=true."
+    )]
+    fn write_file(&self, Parameters(args): Parameters<WriteFileInput>) -> String {
+        let result = self.write_text_file_inner(&args);
+        self.record_audit("write_file", Some(&args.path), result.is_ok());
+        match result {
+            Ok(()) => "File written successfully".into(),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "List active interactive terminal sessions. Compatible with Desktop Commander's list_sessions tool."
+    )]
+    fn list_sessions(&self) -> String {
+        self.list_terminal_sessions()
+    }
+
+    #[tool(
+        description = "Send bounded input to an active interactive terminal session. Compatible with Desktop Commander's interact_with_process tool."
+    )]
+    fn interact_with_process(&self, Parameters(args): Parameters<TerminalWriteInput>) -> String {
+        match self.write_terminal_inner(&args.session_id, &args.data) {
+            Ok(()) => "Terminal input sent".into(),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Read available output from an interactive terminal session. Compatible with Desktop Commander's read_process_output tool."
+    )]
+    fn read_process_output(&self, Parameters(args): Parameters<TerminalSessionInput>) -> String {
+        match self.read_terminal_inner(&args.session_id) {
+            Ok(output) => serde_json::to_string_pretty(&output).unwrap_or_else(|error| {
+                format!("ERROR: cannot serialize terminal output: {error}")
+            }),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Terminate an interactive terminal session. Compatible with Desktop Commander's force_terminate tool; only sessions created by this server can be closed."
+    )]
+    fn force_terminate(&self, Parameters(args): Parameters<TerminalSessionInput>) -> String {
+        let result = self.close_terminal_inner(&args.session_id);
+        self.record_audit("force_terminate", Some(&args.session_id), result.is_ok());
+        match result {
+            Ok(()) => "Terminal session closed".into(),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Send SIGTERM to a current-user process after explicit confirmation. Compatible with Desktop Commander's kill_process tool."
+    )]
+    fn kill_process(&self, Parameters(args): Parameters<TerminateProcessInput>) -> String {
+        if !args.confirm {
+            return "ERROR: set confirm=true to terminate this process".into();
+        }
+        let result = super::processes::terminate_current_user_process(args.pid);
+        let target = args.pid.to_string();
+        self.record_audit("kill_process", Some(&target), result.is_ok());
+        match result {
+            Ok(()) => format!("SIGTERM sent to process {}", args.pid),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
 }
 
 impl DesktopCommanderMcp {

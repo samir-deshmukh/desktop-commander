@@ -129,7 +129,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "start_search", "get_more_search_results", "list_searches", "stop_search", "write_text_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_accessible_apps", "read_accessibility_tree", "list_processes", "terminate_process", "get_config", "get_recent_tool_calls", "get_usage_stats"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "start_search", "get_more_search_results", "list_searches", "stop_search", "write_text_file", "write_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "interact_with_process", "read_terminal", "read_process_output", "close_terminal", "force_terminate", "list_terminal_sessions", "list_sessions", "list_accessible_apps", "read_accessibility_tree", "list_processes", "terminate_process", "kill_process", "get_config", "get_recent_tool_calls", "get_usage_stats"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -195,6 +195,16 @@ def main() -> int:
             ))
             assert contents == "MCP integration test file\n"
             passed.append("approved text-file read")
+
+            alias_target = approved / "write-alias.txt"
+            alias_write = response_text(client.request(
+                "tools/call", {"name": "write_file", "arguments": {
+                    "path": str(alias_target), "content": "alias write passed", "overwrite": False
+                }}
+            ))
+            assert alias_write == "File written successfully"
+            assert alias_target.read_text(encoding="utf-8") == "alias write passed"
+            passed.append("Desktop Commander write_file compatibility alias")
 
             ranged = response_text(client.request(
                 "tools/call", {"name": "read_file", "arguments": {
@@ -317,7 +327,7 @@ def main() -> int:
             assert terminal_started.startswith("Terminal started: ")
             terminal_id = terminal_started.split(": ", 1)[1]
             sent = response_text(client.request(
-                "tools/call", {"name": "write_terminal", "arguments": {
+                "tools/call", {"name": "interact_with_process", "arguments": {
                     "session_id": terminal_id, "data": "printf 'MCP_TERMINAL_OK\\n'\n"
                 }}
             ))
@@ -325,7 +335,7 @@ def main() -> int:
             terminal_output = ""
             for _ in range(30):
                 read_result = json.loads(response_text(client.request(
-                    "tools/call", {"name": "read_terminal", "arguments": {"session_id": terminal_id}}
+                    "tools/call", {"name": "read_process_output", "arguments": {"session_id": terminal_id}}
                 )))
                 terminal_output += read_result["output"]
                 if "MCP_TERMINAL_OK" in terminal_output:
@@ -333,11 +343,11 @@ def main() -> int:
                 time.sleep(0.02)
             assert "MCP_TERMINAL_OK" in terminal_output
             sessions = json.loads(response_text(client.request(
-                "tools/call", {"name": "list_terminal_sessions", "arguments": {}}
+                "tools/call", {"name": "list_sessions", "arguments": {}}
             )))
             assert terminal_id in sessions
             closed = response_text(client.request(
-                "tools/call", {"name": "close_terminal", "arguments": {"session_id": terminal_id}}
+                "tools/call", {"name": "force_terminate", "arguments": {"session_id": terminal_id}}
             ))
             assert "closed" in closed.lower()
             passed.append("interactive terminal start, input, output, and close")
@@ -393,7 +403,7 @@ def main() -> int:
                 ))
                 assert "confirm=true" in denied_termination
                 terminated = response_text(client.request(
-                    "tools/call", {"name": "terminate_process", "arguments": {
+                    "tools/call", {"name": "kill_process", "arguments": {
                         "pid": child_process.pid, "confirm": True
                     }}
                 ))
@@ -484,7 +494,7 @@ def main() -> int:
         assert activity_file.is_file(), "MCP actions should create the local activity log"
         events = [json.loads(line) for line in activity_file.read_text(encoding="utf-8").splitlines()]
         actions = {event["action"] for event in events}
-        assert {"read_text_file", "write_text_file", "run_command", "start_terminal", "terminate_process"}.issubset(actions)
+        assert {"read_text_file", "write_text_file", "run_command", "start_terminal", "kill_process"}.issubset(actions)
         assert all("content" not in event and "args" not in event for event in events)
         passed.append("local audit log records actions without file contents or command arguments")
 

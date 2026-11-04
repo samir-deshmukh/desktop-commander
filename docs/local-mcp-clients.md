@@ -64,6 +64,7 @@ Each AI application has its own configuration file and may use a different confi
 | read_multiple_files | Read up to 10 approved UTF-8 files with a combined 4 MiB cap |
 | search_content | Search bounded UTF-8 file contents recursively inside an approved folder |
 | write_text_file | Create or replace a UTF-8 text file inside a separately writable folder |
+| write_file | Original Desktop Commander-compatible name for the same permission-checked text write |
 | create_directory | Create one directory inside a separately writable folder |
 | move_file | Move or rename one regular file inside writable folders |
 | append_file | Append UTF-8 text while keeping the combined file within 1 MiB |
@@ -72,13 +73,18 @@ Each AI application has its own configuration file and may use a different confi
 | run_command | Run one executable directly in an approved working directory, with bounded output and timeout |
 | start_terminal | Start an interactive local shell session (maximum 3) |
 | write_terminal | Send bounded input to an active terminal session |
+| interact_with_process | Original Desktop Commander-compatible name for terminal input |
 | read_terminal | Read bounded output from an active terminal session |
+| read_process_output | Original Desktop Commander-compatible name for terminal output |
 | close_terminal | Close a terminal session and terminate its shell |
+| force_terminate | Original Desktop Commander-compatible name for closing a server-owned terminal session |
 | list_terminal_sessions | List active MCP terminal session IDs |
+| list_sessions | Original Desktop Commander-compatible name for listing terminal sessions |
 | list_accessible_apps | List Linux applications exposed by the AT-SPI accessibility registry (requires confirm=true) |
 | read_accessibility_tree | Read a bounded, read-only accessibility snapshot for one named application (requires confirm=true) |
 | list_processes | Inspect metadata for current-user Linux processes |
 | terminate_process | Send SIGTERM to a current-user process after explicit confirmation |
+| kill_process | Original Desktop Commander-compatible name for the same confirmed SIGTERM operation |
 | get_config | Read current folder permissions, command-access state, and server limits |
 | get_recent_tool_calls | Read recent MCP activity metadata |
 | get_usage_stats | Aggregate recent MCP tool usage counts |
