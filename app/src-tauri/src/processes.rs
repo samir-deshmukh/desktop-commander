@@ -14,6 +14,8 @@ pub(crate) struct ProcessInfo {
     pub name: String,
     pub state: String,
     pub resident_memory_bytes: Option<u64>,
+    pub protected: bool,
+    pub protection_reason: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -32,6 +34,7 @@ pub(crate) fn list_current_user_processes() -> Result<ProcessSnapshot, String> {
         )?;
         let entries = fs::read_dir(proc_root)
             .map_err(|error| format!("Cannot enumerate Linux processes: {error}"))?;
+        let protected_pids = current_process_ancestors(proc_root);
         let mut processes = Vec::new();
 
         for entry in entries.flatten() {
@@ -42,7 +45,9 @@ pub(crate) fn list_current_user_processes() -> Result<ProcessSnapshot, String> {
             else {
                 continue;
             };
-            if let Some(process) = read_process(proc_root, pid, current_uid) {
+            if let Some(mut process) = read_process(proc_root, pid, current_uid) {
+                process.protection_reason = protection_reason(&process.name, pid, &protected_pids);
+                process.protected = process.protection_reason.is_some();
                 processes.push(process);
             }
         }
@@ -75,8 +80,12 @@ pub(crate) fn terminate_current_user_process(pid: u32) -> Result<(), String> {
         )?;
         let target = read_process(proc_root, pid, current_uid)
             .ok_or("Process is not running or is not owned by the current user")?;
-        if target.name == "app" || target.name.starts_with("sam-desktop") {
-            return Err("Refusing to terminate Sam's Desktop Commander processes".into());
+        let protected_pids = current_process_ancestors(proc_root);
+        if let Some(reason) = protection_reason(&target.name, pid, &protected_pids) {
+            return Err(format!(
+                "Refusing to stop protected process '{}': {reason}",
+                target.name
+            ));
         }
         let status = Command::new("kill")
             .args(["-TERM", &pid.to_string()])
@@ -137,7 +146,84 @@ fn read_process(proc_root: &Path, pid: u32, current_uid: u32) -> Option<ProcessI
         name,
         state,
         resident_memory_bytes,
+        protected: false,
+        protection_reason: None,
     })
+}
+
+// Never allow the process manager to terminate the desktop/login infrastructure
+// or any process in the ancestry of this app. The latter protects the active
+// graphical session even when its session manager has a distribution-specific name.
+fn current_process_ancestors(proc_root: &Path) -> std::collections::HashSet<u32> {
+    let mut protected = std::collections::HashSet::new();
+    let mut pid = std::process::id();
+    for _ in 0..64 {
+        if pid <= 1 || !protected.insert(pid) {
+            break;
+        }
+        let Ok(status) = fs::read_to_string(proc_root.join(pid.to_string()).join("status")) else {
+            break;
+        };
+        let Some(parent) = status
+            .lines()
+            .find_map(|line| line.strip_prefix("PPid:"))
+            .and_then(|v| v.trim().parse::<u32>().ok())
+        else {
+            break;
+        };
+        pid = parent;
+    }
+    protected.insert(1);
+    protected
+}
+
+fn protection_reason(
+    name: &str,
+    pid: u32,
+    ancestors: &std::collections::HashSet<u32>,
+) -> Option<String> {
+    if ancestors.contains(&pid) {
+        return Some("required by the current app or its login-session ancestry".into());
+    }
+    let normalized = name.to_ascii_lowercase();
+    let protected_names = [
+        "systemd",
+        "init",
+        "login",
+        "lightdm",
+        "gdm",
+        "gdm-session-wor",
+        "sddm",
+        "xdm",
+        "cinnamon-session",
+        "gnome-session",
+        "xfce4-session",
+        "mate-session",
+        "lxsession",
+        "ksmserver",
+        "plasmashell",
+        "cinnamon",
+        "muffin",
+        "xfwm4",
+        "kwin_x11",
+        "kwin_wayland",
+        "Xorg",
+        "Xwayland",
+        "X",
+        "dbus-daemon",
+        "dbus-broker",
+        "polkitd",
+        "systemd-logind",
+    ];
+    if protected_names
+        .iter()
+        .any(|protected| normalized == protected.to_ascii_lowercase())
+        || normalized == "app"
+        || normalized.starts_with("sam-desktop")
+    {
+        return Some("critical desktop, login, or Desktop Commander infrastructure".into());
+    }
+    None
 }
 
 #[cfg(test)]
@@ -164,6 +250,7 @@ mod tests {
         assert_eq!(owned.name, "owned-app");
         assert_eq!(owned.parent_pid, 1);
         assert_eq!(owned.resident_memory_bytes, Some(12 * 1024));
+        assert!(!owned.protected);
         assert!(read_process(&root, 202, 1000).is_none());
 
         fs::remove_dir_all(root).unwrap();
@@ -191,6 +278,16 @@ mod tests {
         terminate_current_user_process(child.id()).expect("terminate owned child");
         let status = child.wait().expect("reap test child");
         assert!(!status.success());
+    }
+
+    #[test]
+    fn protects_desktop_and_login_processes() {
+        let ancestors = std::collections::HashSet::from([10, 20, 1]);
+        assert!(protection_reason("cinnamon-session", 99, &ancestors).is_some());
+        assert!(protection_reason("Xorg", 98, &ancestors).is_some());
+        assert!(protection_reason("app", 97, &ancestors).is_some());
+        assert!(protection_reason("bash", 10, &ancestors).is_some());
+        assert!(protection_reason("python", 101, &ancestors).is_none());
     }
 
     #[test]
