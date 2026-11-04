@@ -43,7 +43,7 @@ function InteractiveTerminal({ cwd, reportError }: { cwd: string; reportError: (
           if (event.payload.session_id === id) terminal.write(event.payload.data);
         });
         unlistenExit = await listen<{session_id: string}>('terminal-exited', (event) => {
-          if (event.payload.session_id === id && alive) setTerminalState('Shell exited');
+          if (event.payload.session_id === id && alive) { setTerminalState('Shell exited'); setSessionId(''); void invoke('terminal_close', { sessionId: id }).catch((e) => reportError(String(e))); }
         });
         fit.fit();
         const started = await invoke<{session_id: string}>('terminal_start', { cwd, cols: terminal.cols, rows: terminal.rows });

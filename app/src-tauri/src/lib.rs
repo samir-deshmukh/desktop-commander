@@ -2,7 +2,7 @@
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "desktop")]
-use std::{collections::HashMap, io::Write};
+use std::{collections::HashMap, io::Write, thread, time::Duration};
 use std::{
     fs,
     io::Read,
@@ -23,6 +23,24 @@ struct PtySession {
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
 }
+
+#[cfg(feature = "desktop")]
+impl Drop for PtySession {
+    fn drop(&mut self) {
+        // Reap the shell when a session is explicitly closed or app state is dropped.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[cfg(feature = "desktop")]
+const MAX_TERMINAL_SESSIONS: usize = 3;
+// Pace PTY output to prevent an output-heavy command from flooding Tauri events.
+// The fixed read buffer and short sleep keep application-side buffering bounded.
+#[cfg(feature = "desktop")]
+const TERMINAL_OUTPUT_CHUNK_BYTES: usize = 16 * 1024;
+#[cfg(feature = "desktop")]
+const TERMINAL_OUTPUT_INTERVAL: Duration = Duration::from_millis(40);
 
 #[cfg(feature = "desktop")]
 #[derive(Default)]
@@ -328,6 +346,12 @@ fn terminal_start(
         .0
         .lock()
         .map_err(|_| "Terminal session state unavailable")?;
+    if sessions_map.len() >= MAX_TERMINAL_SESSIONS {
+        let mut child = child;
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("At most {MAX_TERMINAL_SESSIONS} terminal sessions may be active"));
+    }
     sessions_map.insert(
         session_id.clone(),
         PtySession {
@@ -341,7 +365,7 @@ fn terminal_start(
     let output_id = session_id.clone();
     std::thread::spawn(move || {
         let mut reader = reader;
-        let mut buffer = [0_u8; 4096];
+        let mut buffer = [0_u8; TERMINAL_OUTPUT_CHUNK_BYTES];
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) | Err(_) => break,
@@ -351,6 +375,9 @@ fn terminal_start(
                         "terminal-output",
                         serde_json::json!({"session_id": output_id, "data": data}),
                     );
+                    // Backpressure the PTY reader instead of accumulating output in
+                    // application memory or emitting an unbounded stream of events.
+                    thread::sleep(TERMINAL_OUTPUT_INTERVAL);
                 }
             }
         }
@@ -432,10 +459,8 @@ fn terminal_close(session_id: String, sessions: State<'_, TerminalSessions>) -> 
         .0
         .lock()
         .map_err(|_| "Terminal session state unavailable")?;
-    if let Some(mut session) = map.remove(&session_id) {
-        let _ = session.child.kill();
-        let _ = session.child.wait();
-    }
+    // PtySession::drop kills and reaps the shell. This also applies during app shutdown.
+    map.remove(&session_id);
     Ok(())
 }
 
