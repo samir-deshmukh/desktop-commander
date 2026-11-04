@@ -350,7 +350,9 @@ fn terminal_start(
         let mut child = child;
         let _ = child.kill();
         let _ = child.wait();
-        return Err(format!("At most {MAX_TERMINAL_SESSIONS} terminal sessions may be active"));
+        return Err(format!(
+            "At most {MAX_TERMINAL_SESSIONS} terminal sessions may be active"
+        ));
     }
     sessions_map.insert(
         session_id.clone(),
@@ -498,6 +500,76 @@ fn list_folder(path: String, policy: State<'_, AccessPolicy>) -> Result<Vec<Fold
 #[cfg(all(test, feature = "desktop"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn authorization_rejects_paths_outside_approved_root_and_after_revocation() {
+        let base = std::env::temp_dir().join(format!("sam-policy-auth-{}", std::process::id()));
+        let approved = base.join("approved");
+        let outside = base.join("outside");
+        let storage = base.join("approvals.json");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&approved).expect("create approved directory");
+        fs::create_dir_all(&outside).expect("create outside directory");
+        let inside_file = approved.join("inside.txt");
+        let outside_file = outside.join("outside.txt");
+        fs::write(&inside_file, "inside").expect("create inside file");
+        fs::write(&outside_file, "outside").expect("create outside file");
+
+        let policy = AccessPolicy::load(storage).expect("load policy");
+        let canonical = approved.canonicalize().expect("canonical approved root");
+        policy
+            .persist(std::slice::from_ref(&canonical))
+            .expect("persist approval");
+        policy.refresh().expect("refresh approval");
+
+        assert!(policy.authorize_path(&inside_file).is_ok());
+        assert!(
+            policy
+                .authorize_path(&outside_file)
+                .unwrap_err()
+                .contains("outside every approved folder")
+        );
+
+        policy.approved_roots.lock().expect("lock roots").clear();
+        assert!(
+            policy
+                .authorize_path(&inside_file)
+                .unwrap_err()
+                .contains("outside every approved folder")
+        );
+        fs::remove_dir_all(&base).expect("cleanup test directories");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn authorization_rejects_symbolic_link_paths() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!("sam-policy-symlink-{}", std::process::id()));
+        let approved = base.join("approved");
+        let target = base.join("target.txt");
+        let link = approved.join("linked.txt");
+        let storage = base.join("approvals.json");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&approved).expect("create approved directory");
+        fs::write(&target, "target").expect("create link target");
+        symlink(&target, &link).expect("create symlink");
+
+        let policy = AccessPolicy::load(storage).expect("load policy");
+        let canonical = approved.canonicalize().expect("canonical approved root");
+        policy
+            .persist(std::slice::from_ref(&canonical))
+            .expect("persist approval");
+        policy.refresh().expect("refresh approval");
+
+        assert!(
+            policy
+                .authorize_path(&link)
+                .unwrap_err()
+                .contains("symbolic links")
+        );
+        fs::remove_dir_all(&base).expect("cleanup test directories");
+    }
 
     #[test]
     #[cfg(feature = "desktop")]
