@@ -240,6 +240,18 @@ function App() {
       setEntries(await invoke<Entry[]>('list_folder', { path: currentPath }));
     } catch (e) { setError(String(e)); }
   };
+  const copyPreview = async () => {
+    if (!preview) return;
+    const currentName = preview.path.split('/').pop() ?? '';
+    const name = window.prompt('Copy file as', currentName + '.copy');
+    if (!name) return;
+    setError('');
+    try {
+      const destination = buildChildPath(name);
+      await invoke('copy_file', { source: preview.path, destination, confirm: true });
+      setEntries(await invoke<Entry[]>('list_folder', { path: currentPath }));
+    } catch (e) { setError(String(e)); }
+  };
   const renamePreview = async () => {
     if (!preview) return;
     const name = window.prompt('New file name', preview.path.split('/').pop() ?? '');
@@ -285,7 +297,7 @@ function App() {
             {error && <p className="error-message" role="alert">{error}</p>}
             <div className="folder-layout"><div className="folder-list"><h3>Access roots <span>{folders.length}</span></h3>{folders.length === 0 ? <p className="muted-copy">No folders approved yet.</p> : folders.map((folder) => <div className="folder-row" key={folder}><button className="folder-select" onClick={() => void openFolder(folder)}>▰ <span>{folder}</span></button><button className="write-toggle" onClick={() => void toggleWriteAccess(folder)}>{writableFolders.includes(folder) ? 'Disable changes' : 'Enable changes'}</button><button className="revoke-button" onClick={() => void revokeFolder(folder)}>Revoke</button></div>)}</div>
               <div className="directory-view"><div className="directory-heading"><div className="directory-heading-top"><h3>Directory contents</h3><div className="directory-actions">{approvedWriteAccess && <><button className="directory-up" onClick={() => void createTextFile()}>+ File</button><button className="directory-up" onClick={() => void createSubfolder()}>+ Folder</button></>}{canNavigateUp && <button className="directory-up" onClick={() => void openFolder(parentPath)}>↑ Up</button>}</div></div><span>{currentPath || 'Select an approved folder'}</span></div>{busy ? <p className="muted-copy">Loading…</p> : entries.length === 0 ? <p className="muted-copy">Choose an approved root to browse its files and folders.</p> : <div className="entry-list">{entries.map((entry) => <button className="entry-row" key={entry.path} onClick={() => void (entry.is_dir ? openFolder(entry.path) : openFile(entry.path))}><span>{entry.is_dir ? '▰' : '▤'}</span><span>{entry.name}</span><small>{entry.is_dir ? 'Open →' : 'Preview'}</small></button>)}</div>}</div></div>
-            {preview && <div className="file-preview"><div className="preview-heading"><strong>{approvedWriteAccess ? 'Text editor' : 'Text preview'}</strong><span>{preview.path}</span>{approvedWriteAccess && <><button disabled={!previewDirty} onClick={() => void savePreview()}>Save</button><button onClick={() => void renamePreview()}>Rename</button><button className="danger-action" onClick={() => void deletePreview()}>Delete</button></>}<button onClick={() => { setPreview(null); setPreviewDirty(false); }}>Close</button></div>{approvedWriteAccess ? <textarea className="file-editor" value={preview.content} onChange={(event) => { setPreview({ ...preview, content: event.target.value }); setPreviewDirty(true); }} spellCheck={false} /> : <pre>{preview.content}</pre>}</div>}
+            {preview && <div className="file-preview"><div className="preview-heading"><strong>{approvedWriteAccess ? 'Text editor' : 'Text preview'}</strong><span>{preview.path}</span>{approvedWriteAccess && <><button disabled={!previewDirty} onClick={() => void savePreview()}>Save</button><button onClick={() => void copyPreview()}>Copy</button><button onClick={() => void renamePreview()}>Rename</button><button className="danger-action" onClick={() => void deletePreview()}>Delete</button></>}<button onClick={() => { setPreview(null); setPreviewDirty(false); }}>Close</button></div>{approvedWriteAccess ? <textarea className="file-editor" value={preview.content} onChange={(event) => { setPreview({ ...preview, content: event.target.value }); setPreviewDirty(true); }} spellCheck={false} /> : <pre>{preview.content}</pre>}</div>}
             <p className="hint-copy">Symbolic links are hidden. Read access is separate from write access. Writable folders support text editing, new files and folders, rename, and confirmed file deletion. Text reads and writes are limited to 1 MiB.</p>
           </div> : active === 'Processes' ? <div className="workspace-panel processes-panel">
             <div className="workspace-toolbar"><div><h2>Running processes</h2><p>Process metadata for your Linux user. Command arguments are not collected.</p></div><button className="primary-button" disabled={processBusy} onClick={() => void refreshProcesses()}>{processBusy ? 'Refreshing…' : 'Refresh'}</button></div>

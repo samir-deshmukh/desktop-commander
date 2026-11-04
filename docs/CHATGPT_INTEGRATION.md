@@ -31,12 +31,16 @@ These are separate requirements. Having a Platform tunnel does not grant ChatGPT
 
 ## Current project status
 
-The existing STDIO server exposes only:
-- `list_approved_folders`
-- `list_directory`
-- `read_text_file`
+The local MCP server now exposes filesystem, terminal, process, audit-history, and usage-statistics tools. Its current tool catalog is documented in the local MCP client setup guide.
 
-It is read-only. Do not describe this as full Desktop Commander functionality yet. File modification, command execution through MCP, audit history, and desktop automation are not implemented.
+Permission gates remain local:
+- Folder reads require an approved folder.
+- File mutations require a separate writable-folder approval.
+- Command execution is disabled by default and must be enabled in the desktop app.
+- Each command and terminal start requires an explicit confirmation field.
+- Process termination requires explicit confirmation and is limited to eligible current-user processes.
+
+The local terminal and MCP command runner execute with the desktop user's normal OS permissions. An approved working directory is not a sandbox. Desktop automation is not implemented yet.
 
 ## Setup outline (only after account access is available)
 
@@ -52,7 +56,7 @@ It is read-only. Do not describe this as full Desktop Commander functionality ye
 4. Create a named STDIO profile using the tunnel ID and the absolute path to `sam-desktop-mcp`. Follow the current `tunnel-client help quickstart`; its CLI flags may change.
 5. Run `tunnel-client doctor --profile <profile> --explain`, then start the profile.
 6. In ChatGPT web, add a custom MCP server and choose the Tunnel connection. This step requires an eligible ChatGPT workspace and the relevant workspace permissions.
-7. Initially expose only read-only tools. Test approved-folder reads and denial outside approved roots before considering any write or command tools.
+7. Keep writable-folder approvals and MCP command execution disabled initially. Verify read access and denial outside approved roots first; enable write or command access only from the local desktop app when needed.
 
 ## Security rules
 
@@ -60,7 +64,7 @@ It is read-only. Do not describe this as full Desktop Commander functionality ye
 - Keep the tunnel runtime key outside the repository and outside chat messages.
 - Keep folder approvals empty by default; the desktop owner must approve roots locally.
 - Treat all MCP inputs and file contents as untrusted.
-- Do not add write, delete, shell, or process-termination tools until each has a separate policy, explicit approval design, audit event, and tests.
+- Keep write, delete, command, terminal, and process-termination operations behind their existing local permission and confirmation gates; extend tests before broadening them.
 - Keep the tunnel client stopped unless remote access is intentionally being used.
 - Revoke the tunnel and runtime key if access is no longer needed.
 

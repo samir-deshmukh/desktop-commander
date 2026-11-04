@@ -129,7 +129,7 @@ def main() -> int:
             client.notify("notifications/initialized")
             discovered = client.request("tools/list")
             names = {tool["name"] for tool in discovered.get("tools", [])}
-            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process", "get_recent_tool_calls", "get_usage_stats"}
+            expected = {"list_approved_folders", "list_directory", "read_text_file", "read_file", "edit_block", "search_files", "get_file_info", "read_multiple_files", "search_content", "write_text_file", "create_directory", "delete_file", "move_file", "append_file", "copy_file", "run_command", "start_terminal", "write_terminal", "read_terminal", "close_terminal", "list_terminal_sessions", "list_processes", "terminate_process", "get_recent_tool_calls", "get_usage_stats"}
             assert names == expected, f"Unexpected tool set: {names!r}"
             passed.append("tool discovery")
 
@@ -360,6 +360,30 @@ def main() -> int:
             ))
             assert "successfully" in moved_result.lower() and moved.exists() and not created.exists()
             passed.append("confirmed file move")
+
+            append_target = approved / "append-target.txt"
+            appended = response_text(client.request(
+                "tools/call", {"name": "append_file", "arguments": {
+                    "path": str(append_target), "content": "first"
+                }}
+            ))
+            appended_again = response_text(client.request(
+                "tools/call", {"name": "append_file", "arguments": {
+                    "path": str(append_target), "content": " second"
+                }}
+            ))
+            assert "successfully" in appended.lower() and "successfully" in appended_again.lower()
+            assert append_target.read_text(encoding="utf-8") == "first second"
+            passed.append("bounded file append")
+
+            copy_target = approved / "copy-target.txt"
+            copied = response_text(client.request(
+                "tools/call", {"name": "copy_file", "arguments": {
+                    "source": str(sample), "destination": str(copy_target), "confirm": True
+                }}
+            ))
+            assert "successfully" in copied.lower() and copy_target.read_text(encoding="utf-8") == sample.read_text(encoding="utf-8")
+            passed.append("confirmed bounded file copy")
 
             deleted = response_text(client.request(
                 "tools/call", {"name": "delete_file", "arguments": {

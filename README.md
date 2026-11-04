@@ -4,7 +4,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 ## Project status
 
-**Phase:** Local desktop foundation, interactive PTY, read-only process inspection, and permissioned filesystem MCP tools
+**Phase:** Local desktop foundation with permissioned filesystem, interactive terminal, process management, and MCP activity history
 **Initial platform:** Linux Mint (Ubuntu-based)
 **Initial mode:** Local-only
 **Remote integration:** Architecture documented for OpenAI Secure MCP Tunnel; not enabled. ChatGPT Free cannot currently add custom MCP servers.
@@ -14,13 +14,12 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - Tauri 2 + React + TypeScript desktop shell.
 - Persistent, explicitly approved folder roots.
 - Approved-folder browsing, bounded UTF-8 reads, line-range reads, exact-count block editing, recursive filename/content search, file metadata, and multi-file reads.
-- Separate per-folder write approval with an in-app text editor, new file/folder creation, rename, and confirmed file deletion; the same guarded operations are exposed through MCP.
+- Separate per-folder write approval with an in-app text editor, new file/folder creation, append, copy, rename, and confirmed file deletion; the same guarded operations are exposed through MCP.
 - Opt-in one-shot MCP command execution with per-call confirmation, a 30-second timeout, bounded output, and no shell interpretation.
 - Interactive MCP terminal sessions with explicit start/close, bounded input/output, and a three-session limit.
 - Current-user process inspection and confirmed SIGTERM controls, with the application and MCP processes protected.
 - Local activity history shared by desktop and MCP actions, without storing file contents or command arguments.
 - Interactive local PTY terminal using the desktop user's configured shell; the selected approved folder is only the initial working directory, not a sandbox.
-- Read-only process inspection for processes owned by the current Linux user, capped at 500 entries and excluding command-line arguments and environment variables.
 - Unit tests for approval persistence, filesystem authorization, bounded reads, and process metadata filtering.
 - Separate `sam-desktop-mcp` STDIO server built with the official Rust `rmcp` SDK.
 - Three read-only MCP tools: `list_approved_folders`, `list_directory`, and `read_text_file`.
@@ -30,10 +29,9 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 ### Still outstanding
 
 - MCP client compatibility testing across individual AI applications; the automated local STDIO integration test passes, but each client still needs its own configuration test.
-- File writes, file creation, and deletion through MCP.
-- Remaining terminal lifecycle tests (shell exit, resize, output floods, and additional child-process cases).
-- Carefully scoped process termination with explicit confirmation; the current process view is read-only.
-- Activity audit history, desktop automation, and authenticated remote connectivity.
+- Terminal lifecycle tests in the running desktop app (shell exit, resize, output floods, and additional child-process cases).
+- Process-exit race and stale-PID checks.
+- Desktop automation and authenticated ChatGPT connectivity. ChatGPT Free currently cannot add custom MCP servers.
 
 ## Product goals
 
@@ -78,10 +76,10 @@ Small, reviewable changes; a separate commit for each meaningful change; tests f
 1. Architecture and environment verification
 2. Tauri application shell and dashboard
 3. Local MCP STDIO server and protocol smoke test — complete
-4. Approved-folder read-only filesystem tools — complete
-5. File writes and command execution with policy checks and approval
-6. Process management and audit history
-7. Desktop automation, only after evaluating Linux display-session constraints
+4. Permissioned filesystem tools and desktop file manager — complete
+5. Opt-in MCP command execution and interactive terminal sessions — implemented; lifecycle testing remains
+6. Current-user process management and activity history — implemented
+7. Desktop automation, after evaluating Linux display-session constraints
 8. Client compatibility tests
 9. Linux packaging and installation guide
 10. Optional authenticated remote connectivity

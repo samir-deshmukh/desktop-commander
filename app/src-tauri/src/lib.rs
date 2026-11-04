@@ -390,6 +390,48 @@ fn move_approved_file(
     fs::rename(&source, &destination).map_err(|error| format!("Cannot move file: {error}"))
 }
 
+fn copy_approved_file(
+    policy: &AccessPolicy,
+    source: &Path,
+    destination: &Path,
+) -> Result<(), String> {
+    const MAX_COPY_BYTES: u64 = 50 * 1024 * 1024;
+    let source = policy.authorize_path(source)?;
+    let metadata = fs::symlink_metadata(&source)
+        .map_err(|error| format!("Cannot inspect source file: {error}"))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("Only regular files can be copied".into());
+    }
+    if metadata.len() > MAX_COPY_BYTES {
+        return Err(format!(
+            "Source file exceeds the {MAX_COPY_BYTES}-byte copy limit"
+        ));
+    }
+    let destination = policy.authorize_write_target(destination)?;
+    if destination.exists() {
+        return Err("Destination already exists; refusing to overwrite".into());
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary = destination.with_file_name(format!(
+        ".sam-commander-copy-{}-{nonce}.tmp",
+        std::process::id()
+    ));
+    let result = (|| -> Result<(), String> {
+        fs::copy(&source, &temporary)
+            .map_err(|error| format!("Cannot copy source file: {error}"))?;
+        fs::rename(&temporary, &destination)
+            .map_err(|error| format!("Cannot finalize copied file: {error}"))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
 /// Read a regular, non-symlink text file with a hard byte limit.
 /// The size check is repeated while reading so a file that grows after
 /// metadata inspection cannot cause an unbounded allocation.
@@ -467,6 +509,8 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
             "create_directory",
             "delete_file",
             "move_file",
+            "append_file",
+            "copy_file",
             "run_command",
             "start_terminal",
             "write_terminal",
@@ -738,6 +782,22 @@ fn move_file(
     }
     let result = move_approved_file(&policy, Path::new(&source), Path::new(&destination));
     record_desktop_activity(&policy, "move_file", Some(&source), result.is_ok());
+    result
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn copy_file(
+    source: String,
+    destination: String,
+    confirm: bool,
+    policy: State<'_, AccessPolicy>,
+) -> Result<(), String> {
+    if !confirm {
+        return Err("Set confirm=true to copy this file".into());
+    }
+    let result = copy_approved_file(&policy, Path::new(&source), Path::new(&destination));
+    record_desktop_activity(&policy, "copy_file", Some(&source), result.is_ok());
     result
 }
 
@@ -1095,6 +1155,7 @@ pub fn run() {
             create_directory,
             delete_file,
             move_file,
+            copy_file,
             terminal_start,
             terminal_write,
             terminal_resize,

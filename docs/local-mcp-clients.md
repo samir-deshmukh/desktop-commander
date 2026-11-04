@@ -62,6 +62,8 @@ Each AI application has its own configuration file and may use a different confi
 | write_text_file | Create or replace a UTF-8 text file inside a separately writable folder |
 | create_directory | Create one directory inside a separately writable folder |
 | move_file | Move or rename one regular file inside writable folders |
+| append_file | Append UTF-8 text while keeping the combined file within 1 MiB |
+| copy_file | Copy a regular file up to 50 MiB into a writable folder after confirmation |
 | delete_file | Delete one regular file after explicit confirmation |
 | run_command | Run one executable directly in an approved working directory, with bounded output and timeout |
 | start_terminal | Start an interactive local shell session (maximum 3) |
@@ -85,7 +87,7 @@ Each AI application has its own configuration file and may use a different confi
 - Text writes are limited to 1 MiB and use a temporary sibling file followed by atomic rename. The desktop file manager uses the same write policy and limit.
 - Existing files require overwrite=true; delete, move, and directory creation require confirm=true.
 - Delete only handles regular files; directory deletion and recursive deletion are not exposed.
-- Move refuses to overwrite an existing destination.
+- Move and copy refuse to overwrite an existing destination. Copy is capped at 50 MiB; append keeps the combined UTF-8 file within 1 MiB.
 - MCP command execution is disabled by default and must be enabled in the desktop app. Each call also requires confirm=true.
 - Commands are launched directly without shell interpretation, with a 30-second timeout and 256 KiB caps for stdout and stderr.
 - Commands run with the desktop user's normal OS permissions; an approved working directory is not a sandbox.

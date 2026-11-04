@@ -65,3 +65,4 @@ nav { display: grid; gap: 5px; }.nav-item { display: flex; align-items: center; 
 .activity-panel .process-table-wrap { max-height:560px; }
 .activity-panel .process-table td:nth-child(2) { color:#c6ccd6; }
 .activity-panel .process-table td:nth-child(3) { color:#d8f36a; }
+.preview-heading button { white-space:nowrap; }

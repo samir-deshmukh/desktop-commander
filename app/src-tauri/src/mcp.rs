@@ -100,6 +100,24 @@ struct ConfirmPathInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AppendFileInput {
+    /// Absolute path inside a folder separately approved for changes.
+    path: String,
+    /// Text to append (maximum 1 MiB; combined file remains limited to 1 MiB).
+    content: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CopyFileInput {
+    /// Source regular file inside a read-approved folder.
+    source: String,
+    /// New destination path inside a separately writable folder.
+    destination: String,
+    /// Must be true to confirm copying.
+    confirm: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct MoveFileInput {
     /// Existing regular file inside a folder approved for changes.
     source: String,
@@ -438,6 +456,37 @@ impl DesktopCommanderMcp {
         self.record_audit("move_file", Some(&args.source), result.is_ok());
         match result {
             Ok(()) => "File moved successfully".into(),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Append UTF-8 text to a file inside a separately writable folder. The combined file size is limited to 1 MiB."
+    )]
+    fn append_file(&self, Parameters(args): Parameters<AppendFileInput>) -> String {
+        let result = self.append_file_inner(&args);
+        self.record_audit("append_file", Some(&args.path), result.is_ok());
+        match result {
+            Ok(()) => "Text appended successfully".into(),
+            Err(error) => format!("ERROR: {error}"),
+        }
+    }
+
+    #[tool(
+        description = "Copy one regular file from a read-approved folder to a separately writable folder. Maximum source size is 50 MiB; destination must not exist. Requires confirm=true."
+    )]
+    fn copy_file(&self, Parameters(args): Parameters<CopyFileInput>) -> String {
+        if !args.confirm {
+            return "ERROR: set confirm=true to copy this file".into();
+        }
+        let result = super::copy_approved_file(
+            &self.policy,
+            Path::new(&args.source),
+            Path::new(&args.destination),
+        );
+        self.record_audit("copy_file", Some(&args.source), result.is_ok());
+        match result {
+            Ok(()) => "File copied successfully".into(),
             Err(error) => format!("ERROR: {error}"),
         }
     }
@@ -947,6 +996,22 @@ impl DesktopCommanderMcp {
         super::move_approved_file(&self.policy, Path::new(source), Path::new(destination))
     }
 
+    fn append_file_inner(&self, args: &AppendFileInput) -> Result<(), String> {
+        let target = self.policy.authorize_write_target(Path::new(&args.path))?;
+        let mut content = if target.exists() {
+            read_bounded_text_file(&target, MAX_PREVIEW_BYTES)?
+        } else {
+            String::new()
+        };
+        if content.len().saturating_add(args.content.len()) > MAX_PREVIEW_BYTES as usize {
+            return Err(format!(
+                "Combined file content exceeds the {MAX_PREVIEW_BYTES}-byte limit"
+            ));
+        }
+        content.push_str(&args.content);
+        super::write_approved_text_file(&self.policy, &target, &content, true)
+    }
+
     fn read_multiple_files_inner(&self, paths: &[String]) -> Result<Vec<(String, String)>, String> {
         if paths.is_empty() || paths.len() > MAX_MULTI_READ_FILES {
             return Err(format!(
@@ -1206,6 +1271,25 @@ mod tests {
             .unwrap();
         assert_eq!(matches.len(), 1);
         assert!(matches[0].ends_with("target-config.toml"));
+        let append_target = root.join("append.txt");
+        server
+            .append_file_inner(&AppendFileInput {
+                path: append_target.to_string_lossy().into_owned(),
+                content: "one".into(),
+            })
+            .unwrap();
+        server
+            .append_file_inner(&AppendFileInput {
+                path: append_target.to_string_lossy().into_owned(),
+                content: " two".into(),
+            })
+            .unwrap();
+        assert_eq!(fs::read_to_string(&append_target).unwrap(), "one two");
+        let copy_target = root.join("copied-note.txt");
+        super::super::copy_approved_file(&server.policy, &root.join("note.txt"), &copy_target)
+            .unwrap();
+        assert_eq!(fs::read_to_string(&copy_target).unwrap(), "safe test text");
+
         let multiple = server
             .read_multiple_files_inner(&[
                 root.join("note.txt").to_string_lossy().into_owned(),

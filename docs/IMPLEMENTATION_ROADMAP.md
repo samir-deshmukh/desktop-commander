@@ -5,7 +5,7 @@ Status labels distinguish existing foundation from planned work.
 ## Phase 0 — Repository and architecture
 - [x] Independent local project exists.
 - [x] Tauri 2 + React + TypeScript shell exists.
-- [x] Local MCP STDIO server foundation and read-only filesystem tools exist.
+- [x] Local MCP STDIO server foundation and permissioned filesystem tools exist.
 - [x] Confirm remote GitHub repository linkage and publish repository documentation.
 - [ ] Verify build/test commands from a clean checkout; document exact Linux Mint prerequisites and the limitation that a second full Rust build has not been run on the low-memory machine.
 
@@ -22,7 +22,8 @@ Status labels distinguish existing foundation from planned work.
 - [x] Design separate read and write permissions; read-only remains the default.
 - [x] Require explicit confirmation fields for destructive MCP operations.
 - [x] Add bounded UTF-8 writes using a temporary sibling file and atomic rename; require overwrite=true for existing files.
-- [x] Restrict delete to individual regular files and refuse move destination overwrites.
+- [x] Restrict delete to individual regular files and refuse move/copy destination overwrites.
+- [x] Add bounded UTF-8 append and regular-file copy with separate write approval.
 - [x] Add isolated integration coverage for read-only denial, write approval, create, move, delete, and confirmation checks.
 - [x] Add desktop file editing, file/folder creation, rename, and confirmed deletion controls, shown only for writable roots.
 - [x] Add MCP line-range reads and exact-count block edits with atomic writes and ambiguous-match rejection.
@@ -38,14 +39,12 @@ Status labels distinguish existing foundation from planned work.
 - [x] Runtime-test cleanup behavior on app shutdown; a `sleep 300` child was not present in the immediate post-shutdown process check (single-case evidence, not a universal guarantee).
 - [ ] Test close behavior, shell exit, resize, output floods, and additional child-process behavior in the running desktop app.
 - [x] Add read-only process inspection for processes owned by the current Linux user, with a 500-process cap and no command-line/environment collection.
-- [ ] Design carefully scoped process termination with explicit confirmation and ownership checks.
 - [x] Add opt-in MCP one-shot command execution, disabled by default, with per-call confirmation, direct process invocation (no shell), approved working directory, timeout, and bounded output.
 - [x] Add interactive MCP PTY sessions with start/write/read/list/close tools, a three-session cap, bounded input/output, and shell cleanup on close.
 - [x] Add current-user process listing to MCP and confirmed SIGTERM for eligible current-user PIDs; protect PID 1 and the app/MCP processes.
 - [x] Add a process Stop action in the desktop UI with a confirmation prompt.
 - [x] Test termination against an isolated child process owned by the test runner.
 - [ ] Add further process lifecycle checks for stale PIDs and process-exit races.
-- [ ] Add process termination controls with explicit confirmation and ownership checks; do not rely on command-string blacklists.
 
 ## Phase 4 — Linux desktop automation
 - [ ] Identify active X11/Wayland session and Cinnamon compatibility.
