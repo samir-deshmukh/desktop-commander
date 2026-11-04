@@ -39,3 +39,4 @@ tauri-plugin-log = { version = "2", optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
 rmcp = { version = "=3.6.0", features = ["server", "transport-io"], optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
+portable-pty = "0.9.0"

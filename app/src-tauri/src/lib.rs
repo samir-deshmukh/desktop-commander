@@ -1,6 +1,8 @@
+#[cfg(feature = "desktop")]
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "desktop")]
-use std::process::Command;
+use std::{collections::HashMap, io::Write};
 use std::{
     fs,
     io::Read,
@@ -8,12 +10,23 @@ use std::{
     sync::Mutex,
 };
 #[cfg(feature = "desktop")]
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 #[cfg(feature = "mcp")]
 mod mcp;
 #[cfg(feature = "mcp")]
 pub use mcp::run_stdio_server;
+
+#[cfg(feature = "desktop")]
+struct PtySession {
+    master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    child: Box<dyn Child + Send + Sync>,
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Default)]
+struct TerminalSessions(Mutex<HashMap<String, PtySession>>);
 
 struct AccessPolicy {
     approved_roots: Mutex<Vec<PathBuf>>,
@@ -266,78 +279,164 @@ fn read_text_file(path: String, policy: State<'_, AccessPolicy>) -> Result<Strin
 }
 
 #[cfg(feature = "desktop")]
-fn safe_command_spec(input: &str) -> Option<(&'static str, &'static [&'static str])> {
-    match input.trim() {
-        "pwd" => Some(("pwd", &[])),
-        "git status --short --branch" => Some(("git", &["status", "--short", "--branch"])),
-        "git log -5 --oneline" => Some(("git", &["log", "-5", "--oneline"])),
-        "git diff --stat" => Some(("git", &["diff", "--stat"])),
-        "git branch --show-current" => Some(("git", &["branch", "--show-current"])),
-        "git rev-parse --show-toplevel" => Some(("git", &["rev-parse", "--show-toplevel"])),
-        "rustc --version" => Some(("rustc", &["--version"])),
-        "cargo --version" => Some(("cargo", &["--version"])),
-        "node --version" => Some(("node", &["--version"])),
-        "npm --version" => Some(("npm", &["--version"])),
-        "python3 --version" => Some(("python3", &["--version"])),
-        "free -h" => Some(("free", &["-h"])),
-        "df -h" => Some(("df", &["-h"])),
-        "uname -a" => Some(("uname", &["-a"])),
-        _ => None,
-    }
+#[derive(Serialize)]
+struct TerminalStarted {
+    session_id: String,
 }
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-fn run_safe_command(
-    command: String,
+fn terminal_start(
     cwd: String,
+    cols: u16,
+    rows: u16,
+    app: tauri::AppHandle,
     policy: State<'_, AccessPolicy>,
-) -> Result<String, String> {
-    let (program, args) = safe_command_spec(&command).ok_or_else(|| {
-        "Command not allowed. Choose one of the listed read-only commands.".to_string()
-    })?;
+    sessions: State<'_, TerminalSessions>,
+) -> Result<TerminalStarted, String> {
     let target = policy.authorize_path(Path::new(&cwd))?;
     if !target.is_dir() {
         return Err("Working path is not a directory".into());
     }
-    let output = Command::new(program)
-        .args(args)
-        .current_dir(&target)
-        // Prevent repository-local fsmonitor configuration from launching an external helper.
-        .env("GIT_CONFIG_COUNT", "1")
-        .env("GIT_CONFIG_KEY_0", "core.fsmonitor")
-        .env("GIT_CONFIG_VALUE_0", "false")
-        .output()
-        .map_err(|e| format!("Could not start command: {e}"))?;
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.is_empty() {
-        if !text.is_empty() {
-            text.push('\n');
+    let pty = native_pty_system();
+    let pair = pty
+        .openpty(PtySize {
+            rows: rows.clamp(2, 120),
+            cols: cols.clamp(10, 300),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("Cannot create terminal: {e}"))?;
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
+    let mut command = CommandBuilder::new(shell);
+    command.cwd(&target);
+    command.env("TERM", "xterm-256color");
+    let child = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|e| format!("Cannot start shell: {e}"))?;
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("Cannot read terminal output: {e}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| format!("Cannot write terminal input: {e}"))?;
+    let session_id = format!("pty-{}-{}", std::process::id(), uuid_like_id());
+    let mut sessions_map = sessions
+        .0
+        .lock()
+        .map_err(|_| "Terminal session state unavailable")?;
+    sessions_map.insert(
+        session_id.clone(),
+        PtySession {
+            master: pair.master,
+            writer,
+            child,
+        },
+    );
+    drop(sessions_map);
+
+    let output_id = session_id.clone();
+    std::thread::spawn(move || {
+        let mut reader = reader;
+        let mut buffer = [0_u8; 4096];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(count) => {
+                    let data = String::from_utf8_lossy(&buffer[..count]).into_owned();
+                    let _ = app.emit(
+                        "terminal-output",
+                        serde_json::json!({"session_id": output_id, "data": data}),
+                    );
+                }
+            }
         }
-        text.push_str(&stderr);
+        let _ = app.emit(
+            "terminal-exited",
+            serde_json::json!({"session_id": output_id}),
+        );
+    });
+    Ok(TerminalStarted { session_id })
+}
+
+#[cfg(feature = "desktop")]
+fn uuid_like_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    format!(
+        "{:x}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    )
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn terminal_write(
+    session_id: String,
+    data: String,
+    sessions: State<'_, TerminalSessions>,
+) -> Result<(), String> {
+    if data.len() > 16 * 1024 {
+        return Err("Terminal input chunk exceeds 16 KiB".into());
     }
-    if text.is_empty() {
-        text = if output.status.success() {
-            "Command completed successfully (no output).".into()
-        } else {
-            "Command failed without output.".into()
-        };
+    let mut map = sessions
+        .0
+        .lock()
+        .map_err(|_| "Terminal session state unavailable")?;
+    let session = map
+        .get_mut(&session_id)
+        .ok_or("Terminal session not found")?;
+    session
+        .writer
+        .write_all(data.as_bytes())
+        .map_err(|e| format!("Terminal input failed: {e}"))?;
+    session
+        .writer
+        .flush()
+        .map_err(|e| format!("Terminal flush failed: {e}"))
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn terminal_resize(
+    session_id: String,
+    cols: u16,
+    rows: u16,
+    sessions: State<'_, TerminalSessions>,
+) -> Result<(), String> {
+    let map = sessions
+        .0
+        .lock()
+        .map_err(|_| "Terminal session state unavailable")?;
+    let session = map.get(&session_id).ok_or("Terminal session not found")?;
+    session
+        .master
+        .resize(PtySize {
+            rows: rows.clamp(2, 120),
+            cols: cols.clamp(10, 300),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("Terminal resize failed: {e}"))
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn terminal_close(session_id: String, sessions: State<'_, TerminalSessions>) -> Result<(), String> {
+    let mut map = sessions
+        .0
+        .lock()
+        .map_err(|_| "Terminal session state unavailable")?;
+    if let Some(mut session) = map.remove(&session_id) {
+        let _ = session.child.kill();
+        let _ = session.child.wait();
     }
-    const MAX_OUTPUT_BYTES: usize = 64 * 1024;
-    if text.len() > MAX_OUTPUT_BYTES {
-        let mut boundary = MAX_OUTPUT_BYTES;
-        while !text.is_char_boundary(boundary) {
-            boundary -= 1;
-        }
-        text.truncate(boundary);
-        text.push_str("\n[Output truncated at 64 KiB]");
-    }
-    Ok(format!(
-        "{}\nExit code: {}",
-        text,
-        output.status.code().unwrap_or(-1)
-    ))
+    Ok(())
 }
 
 #[cfg(feature = "desktop")]
@@ -374,16 +473,6 @@ fn list_folder(path: String, policy: State<'_, AccessPolicy>) -> Result<Vec<Fold
 #[cfg(all(test, feature = "desktop"))]
 mod tests {
     use super::*;
-
-    #[test]
-    #[cfg(feature = "desktop")]
-    fn terminal_allows_only_fixed_read_only_commands() {
-        assert!(safe_command_spec("git status --short --branch").is_some());
-        assert!(safe_command_spec("free -h").is_some());
-        assert!(safe_command_spec("rm -rf /").is_none());
-        assert!(safe_command_spec("git status; rm -rf /").is_none());
-        assert!(safe_command_spec("cat /etc/shadow").is_none());
-    }
 
     #[test]
     #[cfg(feature = "desktop")]
@@ -433,7 +522,10 @@ pub fn run() {
             revoke_folder,
             list_folder,
             read_text_file,
-            run_safe_command
+            terminal_start,
+            terminal_write,
+            terminal_resize,
+            terminal_close
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
@@ -441,6 +533,7 @@ pub fn run() {
             let policy_file = data_dir.join("approved_folders.json");
             let policy = AccessPolicy::load(policy_file).map_err(std::io::Error::other)?;
             app.manage(policy);
+            app.manage(TerminalSessions::default());
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

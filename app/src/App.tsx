@@ -1,17 +1,71 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Terminal as XTerminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import { listen } from '@tauri-apps/api/event';
+import '@xterm/xterm/css/xterm.css';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import './App.css';
 
 type Section = 'Overview' | 'File access' | 'Terminal' | 'MCP server' | 'Permissions' | 'Activity';
 type Entry = { name: string; path: string; is_dir: boolean };
-type CommandRun = { command: string; cwd: string; output: string };
 type McpInfo = { command: string; binary_exists: boolean; transport: string; tools: string[] };
 const sections: { label: Section; icon: string }[] = [
   { label: 'Overview', icon: '◫' }, { label: 'File access', icon: '▤' },
   { label: 'Terminal', icon: '>_' }, { label: 'MCP server', icon: '⌘' },
   { label: 'Permissions', icon: '◇' }, { label: 'Activity', icon: '◷' },
 ];
+
+function InteractiveTerminal({ cwd, reportError }: { cwd: string; reportError: (message: string) => void }) {
+  const host = useRef<HTMLDivElement>(null);
+  const [sessionId, setSessionId] = useState('');
+  const [terminalState, setTerminalState] = useState('Starting terminal…');
+  const terminalRef = useRef<XTerminal | null>(null);
+
+  useEffect(() => {
+    if (!host.current || !cwd) return;
+    let alive = true;
+    let id = '';
+    let unlistenOutput: (() => void) | undefined;
+    let unlistenExit: (() => void) | undefined;
+    const terminal = new XTerminal({ cursorBlink: true, convertEol: true, scrollback: 1500, fontSize: 12, fontFamily: "'DM Mono', monospace", theme: { background: '#0d1016', foreground: '#c5cbd5', cursor: '#c7e97b' } });
+    const fit = new FitAddon();
+    terminal.loadAddon(fit);
+    terminal.open(host.current);
+    terminalRef.current = terminal;
+    const sendResize = () => { if (id) void invoke('terminal_resize', { sessionId: id, cols: terminal.cols, rows: terminal.rows }).catch((e) => reportError(String(e))); };
+    const resizeObserver = new ResizeObserver(() => { fit.fit(); sendResize(); });
+    resizeObserver.observe(host.current);
+    terminal.onData((data) => { if (id) void invoke('terminal_write', { sessionId: id, data }).catch((e) => reportError(String(e))); });
+    void (async () => {
+      try {
+        unlistenOutput = await listen<{session_id: string; data: string}>('terminal-output', (event) => {
+          if (event.payload.session_id === id) terminal.write(event.payload.data);
+        });
+        unlistenExit = await listen<{session_id: string}>('terminal-exited', (event) => {
+          if (event.payload.session_id === id && alive) setTerminalState('Shell exited');
+        });
+        fit.fit();
+        const started = await invoke<{session_id: string}>('terminal_start', { cwd, cols: terminal.cols, rows: terminal.rows });
+        id = started.session_id;
+        if (!alive) { await invoke('terminal_close', { sessionId: id }); return; }
+        setSessionId(id);
+        setTerminalState('Connected');
+        sendResize();
+        terminal.focus();
+      } catch (e) { if (alive) { setTerminalState('Could not start'); reportError(String(e)); } }
+    })();
+    return () => {
+      alive = false;
+      resizeObserver.disconnect();
+      unlistenOutput?.(); unlistenExit?.();
+      if (id) void invoke('terminal_close', { sessionId: id });
+      terminal.dispose(); terminalRef.current = null;
+    };
+  }, [cwd, reportError]);
+
+  return <div className="interactive-terminal-wrap"><div className="interactive-terminal-bar"><span><i className="status-dot" /> {terminalState}</span><button disabled={!sessionId} onClick={() => { if (sessionId) void invoke('terminal_close', { sessionId }).then(() => setTerminalState('Closed')); }}>Close session</button></div><div ref={host} className="interactive-terminal" /></div>;
+}
 
 function App() {
   const [active, setActive] = useState<Section>('Overview');
@@ -22,9 +76,6 @@ function App() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [terminalCwd, setTerminalCwd] = useState('');
-  const [terminalCommand, setTerminalCommand] = useState('git status --short --branch');
-  const [terminalOutput, setTerminalOutput] = useState<CommandRun[]>([]);
-  const [terminalBusy, setTerminalBusy] = useState(false);
   const [mcpInfo, setMcpInfo] = useState<McpInfo | null>(null);
 
   useEffect(() => {
@@ -43,6 +94,7 @@ function App() {
     return () => { cancelled = true; };
   }, [active]);
   const effectiveTerminalCwd = folders.includes(terminalCwd) ? terminalCwd : (folders[0] ?? '');
+  const reportTerminalError = useCallback((message: string) => setError(message), []);
   const activeApprovedRoot = folders.find((root) => currentPath === root || currentPath.startsWith(root.endsWith('/') ? root : `${root}/`));
   const parentPath = currentPath ? currentPath.slice(0, currentPath.lastIndexOf('/')) || '/' : '';
   const parentBoundary = activeApprovedRoot ? (activeApprovedRoot.endsWith('/') ? activeApprovedRoot : `${activeApprovedRoot}/`) : '';
@@ -78,15 +130,7 @@ function App() {
     finally { setBusy(false); }
   };
 
-  const executeTerminalCommand = async () => {
-    if (!effectiveTerminalCwd) { setError('Approve a folder before using the command runner.'); return; }
-    setError(''); setTerminalBusy(true);
-    try {
-      const output = await invoke<string>('run_safe_command', { command: terminalCommand, cwd: effectiveTerminalCwd });
-      setTerminalOutput((previous) => [...previous, { command: terminalCommand, cwd: effectiveTerminalCwd, output }].slice(-20));
-    } catch (e) { setError(String(e)); }
-    finally { setTerminalBusy(false); }
-  };
+
 
   const revokeFolder = async (path: string) => {
     setError('');
@@ -136,18 +180,14 @@ function App() {
             {mcpInfo && !mcpInfo.binary_exists && <p className="hint-copy">Build the local server from <code>app/src-tauri</code> with <code>CARGO_BUILD_JOBS=1 cargo build --no-default-features --features mcp --bin sam-desktop-mcp --locked</code>, then reopen this page.</p>}
             <p className="hint-copy">The MCP process reads the same saved folder approvals as this app and reloads them before each tool call. Revoking a folder therefore blocks the next request. This first version does not expose file writes, deletion, arbitrary terminal commands, or remote HTTP.</p>
           </div> : active === 'Terminal' ? <div className="workspace-panel terminal-panel">
-            <div className="workspace-toolbar"><div><h2>Local command runner</h2><p>Run a small set of read-only diagnostic and Git commands inside an approved folder.</p></div><span className="terminal-safety">RESTRICTED COMMANDS</span></div>
+            <div className="workspace-toolbar"><div><h2>Interactive local terminal</h2><p>A real shell running as your desktop user, with keyboard input, terminal output, and resizing.</p></div><span className="terminal-safety">LOCAL PTY</span></div>
             {error && <p className="error-message" role="alert">{error}</p>}
-            {folders.length === 0 ? <p className="muted-copy">Approve a folder in File access before running commands.</p> : <>
-              <div className="terminal-controls"><label>Working folder<select value={effectiveTerminalCwd} onChange={(e) => setTerminalCwd(e.target.value)}>{folders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}</select></label>
-              <label>Command<select value={terminalCommand} onChange={(e) => setTerminalCommand(e.target.value)}>{['pwd','git status --short --branch','git log -5 --oneline','git diff --stat','git branch --show-current','git rev-parse --show-toplevel','rustc --version','cargo --version','node --version','npm --version','python3 --version','free -h','df -h','uname -a'].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-              <button className="primary-button" disabled={terminalBusy || !effectiveTerminalCwd} onClick={() => void executeTerminalCommand()}>{terminalBusy ? 'Running…' : 'Run command'} <span>↗</span></button></div>
+            {folders.length === 0 ? <p className="muted-copy">Approve a folder in File access before starting a terminal.</p> : <>
+              <div className="terminal-controls"><label>Initial working folder<select value={effectiveTerminalCwd} onChange={(e) => setTerminalCwd(e.target.value)}>{folders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}</select></label></div>
+              <InteractiveTerminal key={effectiveTerminalCwd} cwd={effectiveTerminalCwd} reportError={reportTerminalError} />
             </>}
-            <div className="terminal-output"><div className="terminal-output-head"><span>OUTPUT</span><button onClick={() => setTerminalOutput([])} disabled={terminalOutput.length === 0}>Clear history</button></div>
-              {terminalOutput.length === 0 ? <p className="terminal-empty">Command output will appear here.</p> : terminalOutput.map((run, index) => <article className="terminal-run" key={`${run.command}-${index}`}><div className="terminal-run-meta"><code>{run.command}</code><span>{run.cwd}</span></div><pre>{run.output}</pre></article>)}
-            </div>
-            <p className="hint-copy">Safety boundary: commands are selected from a fixed allowlist, no shell is invoked, and the working directory must remain inside an approved folder. File-changing commands are not enabled yet.</p>
-          </div> : <div className="empty-state"><div className="empty-icon">{sections.find((item) => item.label === active)?.icon}</div><h2>{active}</h2><p>This capability will be implemented after the permission and filesystem layers are verified.</p><button className="primary-button" onClick={() => setActive('Overview')}>Back to overview <span>↗</span></button></div>}
+            <p className="hint-copy">This shell is not a command allowlist. It runs with your normal Linux account permissions; the selected folder sets its starting directory but does not sandbox commands to that folder. Do not run commands you do not trust.</p>
+                    </div> : <div className="empty-state"><div className="empty-icon">{sections.find((item) => item.label === active)?.icon}</div><h2>{active}</h2><p>This capability will be implemented after the permission and filesystem layers are verified.</p><button className="primary-button" onClick={() => setActive('Overview')}>Back to overview <span>↗</span></button></div>}
           <footer className="page-footer"><span>Sam's Desktop Commander</span><span>LOCAL-FIRST · PERMISSIONED · OPEN ARCHITECTURE</span></footer>
         </section>
       </main>
