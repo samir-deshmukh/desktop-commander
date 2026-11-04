@@ -14,6 +14,8 @@ use tauri::{Emitter, Manager, State};
 
 #[cfg(feature = "mcp")]
 mod mcp;
+#[cfg(feature = "desktop")]
+mod processes;
 #[cfg(feature = "mcp")]
 pub use mcp::run_stdio_server;
 
@@ -231,6 +233,12 @@ fn mcp_server_info() -> Result<McpServerInfo, String> {
         transport: "stdio",
         tools: vec!["list_approved_folders", "list_directory", "read_text_file"],
     })
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+fn list_processes() -> Result<processes::ProcessSnapshot, String> {
+    processes::list_current_user_processes()
 }
 
 #[cfg(feature = "desktop")]
@@ -614,6 +622,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             mcp_server_info,
+            list_processes,
             approved_folders,
             approve_folder,
             revoke_folder,

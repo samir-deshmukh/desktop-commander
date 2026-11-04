@@ -35,3 +35,13 @@ nav { display: grid; gap: 5px; }.nav-item { display: flex; align-items: center; 
 .interactive-terminal-bar button { border:1px solid #41434b; border-radius:5px; background:transparent; color:#b4bac5; padding:5px 8px; font-size:10px; }
 .interactive-terminal { height:420px; padding:10px; overflow:hidden; }
 .interactive-terminal .xterm { height:100%; }
+
+.process-summary { display:flex; justify-content:space-between; gap:12px; padding:14px 0; color:#858c9a; font:9px 'DM Mono',monospace; }
+.process-table-wrap { max-height:520px; overflow:auto; border:1px solid #292d37; border-radius:7px; }
+.process-table { width:100%; border-collapse:collapse; text-align:left; font:10px 'DM Mono',monospace; }
+.process-table th { position:sticky; top:0; background:#191d26; color:#9da5b3; font-weight:500; }
+.process-table th,.process-table td { padding:10px 12px; border-bottom:1px solid #242833; white-space:nowrap; }
+.process-table td { color:#c6ccd6; }
+.process-table td:nth-child(2) { color:#d8f36a; }
+.process-table tbody tr:last-child td { border-bottom:0; }
+@media (max-width:650px) { .process-summary { flex-direction:column; }.process-table th,.process-table td { padding:9px 8px; font-size:9px; } }

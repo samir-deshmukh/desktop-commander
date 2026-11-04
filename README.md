@@ -4,7 +4,7 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 ## Project status
 
-**Phase:** Local desktop foundation, restricted command runner, and read-only MCP server
+**Phase:** Local desktop foundation, interactive PTY, read-only process inspection, and read-only MCP server
 **Initial platform:** Linux Mint (Ubuntu-based)
 **Initial mode:** Local-only
 **Remote access:** Out of scope until local security and core functionality are verified
@@ -14,8 +14,9 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 - Tauri 2 + React + TypeScript desktop shell.
 - Persistent, explicitly approved folder roots.
 - Read-only directory browsing and bounded UTF-8 text previews.
-- Restricted command runner for a fixed set of read-only diagnostics and Git inspection commands. It does not invoke a shell or accept arbitrary commands.
-- Unit tests for approval persistence and command allowlisting.
+- Interactive local PTY terminal using the desktop user's configured shell; the selected approved folder is only the initial working directory, not a sandbox.
+- Read-only process inspection for processes owned by the current Linux user, capped at 500 entries and excluding command-line arguments and environment variables.
+- Unit tests for approval persistence, filesystem authorization, bounded reads, and process metadata filtering.
 - Separate `sam-desktop-mcp` STDIO server built with the official Rust `rmcp` SDK.
 - Three read-only MCP tools: `list_approved_folders`, `list_directory`, and `read_text_file`.
 - MCP requests reload the shared permission file, so folder revocation applies to the next request.
@@ -25,8 +26,9 @@ A local-first desktop application for Linux Mint that exposes carefully permissi
 
 - MCP client compatibility testing across individual AI applications; the protocol smoke test passes, but each client still needs its own configuration test.
 - File writes, file creation, and deletion through MCP.
-- A full terminal with interactive sessions; arbitrary command execution remains disabled.
-- Process management, activity audit history, desktop automation, and authenticated remote connectivity.
+- Remaining terminal lifecycle tests (shell exit, resize, output floods, and additional child-process cases).
+- Carefully scoped process termination with explicit confirmation; the current process view is read-only.
+- Activity audit history, desktop automation, and authenticated remote connectivity.
 
 ## Product goals
 

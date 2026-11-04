@@ -7,12 +7,20 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import './App.css';
 
-type Section = 'Overview' | 'File access' | 'Terminal' | 'MCP server' | 'Permissions' | 'Activity';
+type Section = 'Overview' | 'File access' | 'Terminal' | 'Processes' | 'MCP server' | 'Permissions' | 'Activity';
 type Entry = { name: string; path: string; is_dir: boolean };
 type McpInfo = { command: string; binary_exists: boolean; transport: string; tools: string[] };
+type ProcessInfo = { pid: number; parent_pid: number; name: string; state: string; resident_memory_bytes: number | null };
+type ProcessSnapshot = { processes: ProcessInfo[]; truncated: boolean };
+
+function formatMemory(bytes: number | null) {
+  if (bytes === null) return '—';
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 const sections: { label: Section; icon: string }[] = [
   { label: 'Overview', icon: '◫' }, { label: 'File access', icon: '▤' },
-  { label: 'Terminal', icon: '>_' }, { label: 'MCP server', icon: '⌘' },
+  { label: 'Terminal', icon: '>_' }, { label: 'Processes', icon: '▦' }, { label: 'MCP server', icon: '⌘' },
   { label: 'Permissions', icon: '◇' }, { label: 'Activity', icon: '◷' },
 ];
 
@@ -77,6 +85,8 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [terminalCwd, setTerminalCwd] = useState('');
   const [mcpInfo, setMcpInfo] = useState<McpInfo | null>(null);
+  const [processSnapshot, setProcessSnapshot] = useState<ProcessSnapshot | null>(null);
+  const [processBusy, setProcessBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +94,13 @@ function App() {
       .then((approved) => { if (!cancelled) setFolders(approved); })
       .catch((e) => { if (!cancelled) setError(String(e)); });
     return () => { cancelled = true; };
+  }, []);
+  const refreshProcesses = useCallback(async () => {
+    setProcessBusy(true);
+    setError('');
+    try { setProcessSnapshot(await invoke<ProcessSnapshot>('list_processes')); }
+    catch (e) { setError(String(e)); }
+    finally { setProcessBusy(false); }
   }, []);
   useEffect(() => {
     if (active !== 'MCP server') return;
@@ -145,7 +162,7 @@ function App() {
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">S</div><div><strong>Sam's Desktop</strong><span>COMMANDER</span></div></div>
         <div className="nav-label">WORKSPACE</div>
-        <nav aria-label="Main navigation">{sections.map((section) => <button key={section.label} className={`nav-item ${active === section.label ? 'selected' : ''}`} onClick={() => setActive(section.label)}><span className="nav-icon">{section.icon}</span>{section.label}</button>)}</nav>
+        <nav aria-label="Main navigation">{sections.map((section) => <button key={section.label} className={`nav-item ${active === section.label ? 'selected' : ''}`} onClick={() => { setActive(section.label); if (section.label === 'Processes') void refreshProcesses(); }}><span className="nav-icon">{section.icon}</span>{section.label}</button>)}</nav>
         <div className="sidebar-bottom"><span className="status-dot" /> Local machine <span className="version">v0.1.0</span></div>
       </aside>
       <main className="main-area">
@@ -164,6 +181,12 @@ function App() {
               <div className="directory-view"><div className="directory-heading"><div className="directory-heading-top"><h3>Directory contents</h3>{canNavigateUp && <button className="directory-up" onClick={() => void openFolder(parentPath)}>↑ Up</button>}</div><span>{currentPath || 'Select an approved folder'}</span></div>{busy ? <p className="muted-copy">Loading…</p> : entries.length === 0 ? <p className="muted-copy">Choose an approved root to browse its files and folders.</p> : <div className="entry-list">{entries.map((entry) => <button className="entry-row" key={entry.path} onClick={() => void (entry.is_dir ? openFolder(entry.path) : openFile(entry.path))}><span>{entry.is_dir ? '▰' : '▤'}</span><span>{entry.name}</span><small>{entry.is_dir ? 'Open →' : 'Preview'}</small></button>)}</div>}</div></div>
             {preview && <div className="file-preview"><div className="preview-heading"><strong>Text preview</strong><span>{preview.path}</span><button onClick={() => setPreview(null)}>Close</button></div><pre>{preview.content}</pre></div>}
             <p className="hint-copy">Symbolic links are hidden. Folder approvals are saved locally and revalidated when the app starts. Text previews are limited to 1 MiB.</p>
+          </div> : active === 'Processes' ? <div className="workspace-panel processes-panel">
+            <div className="workspace-toolbar"><div><h2>Running processes</h2><p>Read-only view of processes owned by your Linux user. Command arguments are not collected.</p></div><button className="primary-button" disabled={processBusy} onClick={() => void refreshProcesses()}>{processBusy ? 'Refreshing…' : 'Refresh'}</button></div>
+            {error && <p className="error-message" role="alert">{error}</p>}
+            {processSnapshot && <><div className="process-summary"><span>{processSnapshot.processes.length} processes shown</span><span>Current user only · No controls to stop processes</span></div><div className="process-table-wrap"><table className="process-table"><thead><tr><th>PID</th><th>Process</th><th>Parent</th><th>State</th><th>Memory</th></tr></thead><tbody>{processSnapshot.processes.map((process) => <tr key={process.pid}><td>{process.pid}</td><td>{process.name}</td><td>{process.parent_pid}</td><td>{process.state}</td><td>{formatMemory(process.resident_memory_bytes)}</td></tr>)}</tbody></table></div>{processSnapshot.truncated && <p className="hint-copy">The list is capped at 500 processes. Some entries are not shown.</p>}</>}
+            {!processSnapshot && !error && <p className="muted-copy">{processBusy ? 'Reading process information…' : 'No process information loaded.'}</p>}
+            <p className="hint-copy">This feature reads Linux process metadata from /proc. It does not read command-line arguments, environment variables, or file contents, and it cannot terminate processes.</p>
           </div> : active === 'MCP server' ? <div className="workspace-panel mcp-panel">
             <div className="workspace-toolbar"><div><h2>Local MCP server</h2><p>Compatible AI clients launch this local process over standard input/output. No network port is opened.</p></div><span className="terminal-safety">STDIO · LOCAL</span></div>
             {error && <p className="error-message" role="alert">{error}</p>}
