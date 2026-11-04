@@ -64,7 +64,7 @@ function InteractiveTerminal({ cwd, reportError }: { cwd: string; reportError: (
     };
   }, [cwd, reportError]);
 
-  return <div className="interactive-terminal-wrap"><div className="interactive-terminal-bar"><span><i className="status-dot" /> {terminalState}</span><button disabled={!sessionId} onClick={() => { if (sessionId) void invoke('terminal_close', { sessionId }).then(() => setTerminalState('Closed')); }}>Close session</button></div><div ref={host} className="interactive-terminal" /></div>;
+  return <div className="interactive-terminal-wrap"><div className="interactive-terminal-bar"><span><i className="status-dot" /> {terminalState}</span><button disabled={!sessionId} onClick={() => { if (sessionId) void invoke('terminal_close', { sessionId }).then(() => { setSessionId(''); setTerminalState('Closed'); }).catch((e) => reportError(String(e))); }}>Close session</button></div><div ref={host} className="interactive-terminal" /></div>;
 }
 
 function App() {
