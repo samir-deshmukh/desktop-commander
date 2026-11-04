@@ -548,6 +548,26 @@ mod tests {
         fs::remove_dir_all(&base).expect("cleanup test directories");
     }
 
+    #[test]
+    fn invalid_saved_permissions_fail_closed() {
+        let base = std::env::temp_dir().join(format!("sam-policy-invalid-{}", std::process::id()));
+        let approved = base.join("approved");
+        let storage = base.join("approvals.json");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&approved).expect("create approved directory");
+        let policy = AccessPolicy::load(storage.clone()).expect("load empty policy");
+        let canonical = approved.canonicalize().expect("canonical root");
+        policy
+            .approved_roots
+            .lock()
+            .expect("lock roots")
+            .push(canonical);
+        fs::write(&storage, b"not valid json").expect("write invalid policy");
+        assert!(policy.refresh().is_err());
+        assert!(policy.approved_roots.lock().expect("lock roots").is_empty());
+        fs::remove_dir_all(base).expect("cleanup test directory");
+    }
+
     #[cfg(unix)]
     #[test]
     fn authorization_rejects_symbolic_link_paths() {
@@ -685,6 +705,35 @@ mod bounded_file_tests {
                 .unwrap_err()
                 .contains("too large")
         );
+        fs::remove_dir_all(dir).expect("cleanup test directory");
+    }
+
+    #[test]
+    fn rejects_directories_and_symbolic_links() {
+        let (dir, file) = test_file();
+        fs::write(&file, b"safe").expect("write target file");
+        assert!(read_bounded_text_file(&dir, 8).is_err());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let link = dir.join("linked.txt");
+            symlink(&file, &link).expect("create symbolic link");
+            assert!(read_bounded_text_file(&link, 8).is_err());
+        }
+        fs::remove_dir_all(dir).expect("cleanup test directory");
+    }
+
+    #[test]
+    fn accepts_empty_file_at_zero_byte_limit() {
+        let (dir, file) = test_file();
+        fs::write(&file, b"").expect("write empty file");
+        assert_eq!(
+            read_bounded_text_file(&file, 0).expect("read empty file"),
+            ""
+        );
+        fs::write(&file, b"x").expect("write non-empty file");
+        assert!(read_bounded_text_file(&file, 0).is_err());
         fs::remove_dir_all(dir).expect("cleanup test directory");
     }
 

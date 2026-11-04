@@ -10,10 +10,10 @@ Status labels distinguish existing foundation from planned work.
 - [ ] Verify build/test commands from a clean checkout and document exact Linux Mint prerequisites.
 
 ## Phase 1 — Read-only reliability
-- [ ] Review every filesystem path check and error path.
-- [ ] Expand tests for traversal, symlinks, file size bounds, and permission revocation.
+- [x] Review filesystem authorization, canonical containment, direct symlink rejection, bounded text reads, and fail-closed permission reload behavior; continue race-condition review before adding write capabilities.
+- [x] Expand tests for outside-root paths, symlinks, file size bounds, invalid UTF-8, and permission revocation.
 - [ ] Test MCP protocol with target clients individually.
-- [ ] Document how approval state is persisted and protected.
+- [x] Document how approval state is persisted and protected, including the same-user limitation.
 
 ## Phase 2 — Controlled file changes
 - [ ] Design separate read/write/delete permissions.

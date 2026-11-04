@@ -24,6 +24,10 @@ Status: baseline design; review whenever a new capability or transport is introd
 - Bound file size, output size, traversal depth, and execution time.
 - Treat file names and contents as untrusted data, never as policy instructions.
 
+## Approval storage
+
+The desktop application stores versioned folder approvals in Tauri's application data directory as `approved_folders.json`. On Linux, Tauri resolves this under the user's application data location (normally `$XDG_DATA_HOME/com.samdeshmukh.desktopcommander`, or `~/.local/share/com.samdeshmukh.desktopcommander` when `XDG_DATA_HOME` is unset). The standalone MCP process uses the same identifier and path convention. The file contains canonical folder paths, not file contents or credentials. Each MCP request reloads the file; malformed or unsupported data fails closed and clears the in-memory approval set. Updates are written to a sibling temporary file and renamed into place. The file is protected by the operating system's user-home permissions; this is not protection against another process running as the same user. Do not manually edit it while either process is active.
+
 ## Terminal policy
 A command-string blacklist is not a reliable security boundary: shells, interpreters, aliases, scripts, and child processes can change command meaning. Do not claim otherwise.
 
