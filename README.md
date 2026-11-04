@@ -65,6 +65,7 @@ Tauri, Rust, React, and TypeScript are in the current implementation. Their depe
 - [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
 - [Local MCP client setup and protocol test](docs/local-mcp-clients.md)
 - [MCP protocol details and repeatable integration test](docs/MCP_PROTOCOL.md)
+- [AI workflow guide: inspect, act, verify](docs/AI_WORKFLOW_GUIDE.md)
 - [ChatGPT remote integration requirements](docs/CHATGPT_INTEGRATION.md)
 - [Linux desktop automation evaluation](docs/DESKTOP_AUTOMATION_EVALUATION.md)
 
